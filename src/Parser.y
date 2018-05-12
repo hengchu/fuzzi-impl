@@ -133,5 +133,6 @@ LabelLiteralPairs
   | LabelLiteralPair ',' LabelLiteralPairs { $1 : $3 }
 
 {
-parseError = undefined
+parseError :: [Token] -> a
+parseError (tok : _) = error $ "Unexpected token: " ++ show tok
 }

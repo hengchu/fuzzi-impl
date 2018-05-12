@@ -20,6 +20,9 @@ cabal-version:  >= 1.10
 extra-source-files:
     ChangeLog.md
     README.md
+                   
+data-dir:               
+    testdata               
 
 source-repository head
   type: git
