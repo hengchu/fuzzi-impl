@@ -7,7 +7,8 @@ import Data.Map (fromList)
 import Prelude hiding (LT, GT, EQ)
 }
 
-%name      parseProg
+%name      parseProg Cmd
+%name      parseExpr Expr
 %tokentype { Token }
 %error     { parseError }
 
