@@ -4,6 +4,8 @@
 module Typechecker.Basic where
 
 import Syntax
+import Control.Monad
+import Data.List
 import Data.Map
 import Data.Map as M
 import Prelude hiding (LT, EQ, GT)
@@ -23,25 +25,27 @@ instance Applicative TcM where
       (Right f', Right a')       -> TcM . Right $ f' a'
       (_, Left errs)             -> TcM . Left $ errs
 
-tcError :: String -> TcM a
-tcError err = TcM . Left $ [err]
+tcError :: Position -> String -> TcM a
+tcError (Position line col) err = TcM . Left $ [errMsg]
+  where errMsg = "Line " ++ show line ++ ", col " ++ show col ++ ":\n" ++ err
 
-tcErrorIf :: Bool -> String -> a -> TcM a
-tcErrorIf cond err val =
-  if cond then tcError err else pure val
+tcErrorIf :: Bool -> Position -> String -> a -> TcM a
+tcErrorIf cond posn err val =
+  if cond then tcError posn err else pure val
 
 tcExpr :: Context -> Expr -> TcM LargeType
 tcExpr ctx = foldExprM tcVar tcLit tcBinop tcIndex tcRupdate tcRaccess
-  where tcVar = \var ->
+  where tcVar posn = \var ->
           case M.lookup var ctx of
-            Nothing -> tcError $ "Unknown variable: " ++ var
+            Nothing -> tcError posn $ "Unknown variable: " ++ var
             Just t -> return t
 
         tcSmallLit = \case
           SILit _ -> STInt
           SFLit _ -> STFloat
           SBLit _ -> STBool
-        tcLit = \case
+
+        tcLit _ = \case
           SLit slit -> pure . LTSmall $ tcSmallLit slit
           RLit (RowLit rlit) -> pure . LTRow . RowType $ M.map tcSmallLit rlit
 
@@ -57,50 +61,128 @@ tcExpr ctx = foldExprM tcVar tcLit tcBinop tcIndex tcRupdate tcRaccess
         isRowLT = \case
           LTRow _ -> True
           _ -> False
-        
-        tcBinop = \tl bop tr ->
-          if tl /= tr
-          then tcError "Binary operation applied to two different types."
-          else case bop of
-            LT -> tcErrorIf (not $ isNumericLT tl) comparisonTcError (LTSmall STBool)
-            LE -> tcErrorIf (not $ isNumericLT tl) comparisonTcError (LTSmall STBool)
-            GT -> tcErrorIf (not $ isNumericLT tl) comparisonTcError (LTSmall STBool)
-            GE -> tcErrorIf (not $ isNumericLT tl) comparisonTcError (LTSmall STBool)
-            AND -> tcErrorIf (not $ tl == LTSmall STBool) boolOpTcError (LTSmall STBool)
-            OR  -> tcErrorIf (not $ tl == LTSmall STBool) boolOpTcError (LTSmall STBool)
-            EQ  -> tcErrorIf (not $ isSmallLT tl || isRowLT tl) eqOpTcError (LTSmall STBool)
-            NEQ -> tcErrorIf (not $ isSmallLT tl || isRowLT tl) eqOpTcError (LTSmall STBool)
-            PLUS  -> tcErrorIf (not $ isNumericLT tl) arithOpTcError tl
-            MINUS -> tcErrorIf (not $ isNumericLT tl) arithOpTcError tl
-            MULT  -> tcErrorIf (not $ isNumericLT tl) arithOpTcError tl
-            DIV   -> tcErrorIf (not $ isNumericLT tl) arithOpTcError tl
 
-        tcIndex = \tarr tidx ->
+        tcBinop posn = \tl bop tr ->
+          if tl /= tr
+          then tcError posn "Binary operation applied to two different types."
+          else case bop of
+            LT -> tcErrorIf (not $ isNumericLT tl) posn comparisonTcError (LTSmall STBool)
+            LE -> tcErrorIf (not $ isNumericLT tl) posn comparisonTcError (LTSmall STBool)
+            GT -> tcErrorIf (not $ isNumericLT tl) posn comparisonTcError (LTSmall STBool)
+            GE -> tcErrorIf (not $ isNumericLT tl) posn comparisonTcError (LTSmall STBool)
+            AND -> tcErrorIf (not $ tl == LTSmall STBool) posn boolOpTcError (LTSmall STBool)
+            OR  -> tcErrorIf (not $ tl == LTSmall STBool) posn boolOpTcError (LTSmall STBool)
+            EQ  -> tcErrorIf (not $ isSmallLT tl || isRowLT tl) posn eqOpTcError (LTSmall STBool)
+            NEQ -> tcErrorIf (not $ isSmallLT tl || isRowLT tl) posn eqOpTcError (LTSmall STBool)
+            PLUS  -> tcErrorIf (not $ isNumericLT tl) posn arithOpTcError tl
+            MINUS -> tcErrorIf (not $ isNumericLT tl) posn arithOpTcError tl
+            MULT  -> tcErrorIf (not $ isNumericLT tl) posn arithOpTcError tl
+            DIV   -> tcErrorIf (not $ isNumericLT tl) posn arithOpTcError tl
+
+        tcIndex posn = \tarr tidx ->
           case (tarr, tidx) of
             (LTArray t, LTSmall STInt) -> return . LTSmall $ t
             (LTBag t, LTSmall STInt) -> return t
-            (_, LTSmall STInt) -> tcError "Indexing can only be applied to arrays or bags"
-            (_, _) -> tcError "Index must be an integer"
+            (_, LTSmall STInt) -> tcError posn "Indexing can only be applied to arrays or bags"
+            (_, _) -> tcError posn "Index must be an integer"
 
-        getRt lt =
+        getRt posn lt =
           case lt of
             LTRow rt -> return . getRowTypes $ rt
-            _ -> tcError "Not a row type"
+            _ -> tcError posn "Not a row type"
 
-        tcRupdate = \trow label tvalue -> do
-          trow' <- getRt trow
+        tcRupdate posn = \trow label tvalue -> do
+          trow' <- getRt posn trow
           case M.lookup label trow' of
-            Nothing -> tcError $ label ++ " doesn't exist"
+            Nothing -> tcError posn $ label ++ " doesn't exist"
             Just t  ->
               if (LTSmall t) == tvalue
               then return trow
-              else tcError "Update value doesn't match label type"
+              else tcError posn "Update value doesn't match label type"
 
-        tcRaccess = \trow label -> do
-          trow' <- getRt trow
+        tcRaccess posn = \trow label -> do
+          trow' <- getRt posn trow
           case M.lookup label trow' of
-            Nothing -> tcError $ label ++ " doesn't exist"
+            Nothing -> tcError posn $ label ++ " doesn't exist"
             Just t  -> return . LTSmall $ t
+
+tcCmdTopLevelDecls :: Cmd -> TcM Context
+tcCmdTopLevelDecls = foldCmdM tcCassign tcCAupdate tcClaplace tcCif tcCwhile tcCdecl tcCseq tcCskip
+  where
+    tcCassign _ _ _ = pure empty
+
+    tcCAupdate _ _ _ _ = pure empty
+
+    tcClaplace _ _ _ _ = pure empty
+
+    tcCif _ _ _ _ = pure empty
+
+    tcCwhile _ _ _ = pure empty
+
+    tcCdecl _ x _ t = pure $ M.singleton x t
+
+    tcCseq posn m1 m2 = do
+      let multiDeclVars = M.intersection m1 m2
+      if M.null multiDeclVars
+      then return $ M.union m1 m2
+      else tcError posn $ multiDeclTcError multiDeclVars
+
+    tcCskip _ = return empty
+
+tcCmd' :: Context -> Cmd -> TcM ()
+tcCmd' ctx c = foldCmdA tcCassign tcCAupdate tcClaplace tcCif tcCwhile tcCdecl tcCseq tcCskip c
+  where
+    lookupVar posn x =
+      case M.lookup x ctx of
+        Just t -> return t
+        Nothing -> tcError posn $ undeclaredVariableTcError x
+
+    tcCassign posn x e = do
+      t <- lookupVar posn x
+      te <- tcExpr ctx e
+      when (t /= te) $
+        tcError posn $ assignTcError x e
+
+    tcCAupdate posn x eidx erhs = do
+      tidx <- tcExpr ctx eidx
+      when (tidx /= LTSmall STInt) $
+        tcError posn $ indexNotIntTcError eidx
+      trhs <- tcExpr ctx erhs
+      tx <- lookupVar posn x
+      case tx of
+        LTArray st -> do
+          when (LTSmall st /= trhs) $
+            tcError posn $ arrayUpdateTcError x eidx erhs
+        LTBag t -> do
+          when (t /= trhs) $
+            tcError posn $ arrayUpdateTcError x eidx erhs
+        _ -> tcError posn "Indexing a non-array/non-bag type"
+
+    tcClaplace posn x _ rhs = tcCassign posn x rhs
+
+    tcCond e = do
+      te <- tcExpr ctx e
+      when (te /= LTSmall STBool) $
+        tcError (exprPosn e) $ condNotBoolTcError e
+
+    tcCif _ e tcT tcF =
+      tcCond e *> tcT *> tcF
+
+    tcCwhile _ e tcBody =
+      tcCond e *> tcBody
+
+    tcCdecl _ _ _ _ = pure ()
+
+    tcCseq _ tc1 tc2 =
+      tc1 *> tc2
+
+    tcCskip _ = return ()
+
+tcCmd :: Cmd -> TcM Context
+tcCmd c = do
+  ctx <- tcCmdTopLevelDecls c
+  tcCmd' ctx c
+  return ctx
 
 -- |Various error messages.
 comparisonTcError :: Error
@@ -114,3 +196,27 @@ eqOpTcError = "Equality testing can only be applied between primitives and recor
 
 arithOpTcError :: Error
 arithOpTcError = "Arithmetic operators can only be applied between primitives"
+
+multiDeclTcError :: Context -> Error
+multiDeclTcError multiDecls =
+  let vars = M.keys multiDecls
+  in "Multiple type declarations for these variables: " ++ (intercalate ", " vars)
+
+assignTcError :: String -> Expr -> Error
+assignTcError var rhs =
+  "Assignment type mismatch in: " ++ var ++ " = " ++ show rhs
+
+undeclaredVariableTcError :: String -> Error
+undeclaredVariableTcError var =
+  "Undeclared variable: " ++ var
+
+indexNotIntTcError :: Expr -> Error
+indexNotIntTcError eidx =
+  "The index expression: " ++ show eidx ++ " is not an int"
+
+arrayUpdateTcError :: String -> Expr -> Expr -> Error
+arrayUpdateTcError var idx rhs =
+  "Array update type mismatch in: " ++ var ++ "[" ++ show idx ++ "]" ++ " = " ++ show rhs
+
+condNotBoolTcError :: Expr -> Error
+condNotBoolTcError econd = "Condition expression: " ++ show econd ++ " is not a boolean"

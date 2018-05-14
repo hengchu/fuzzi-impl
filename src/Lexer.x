@@ -96,4 +96,43 @@ data Token = TIdent     AlexPosn String
            | TSample    AlexPosn
            | TLaplace   AlexPosn
   deriving (Show, Eq)
+
+getAlexPosn :: Token -> AlexPosn
+getAlexPosn (TIdent     p _) = p
+getAlexPosn (TInt       p _) = p
+getAlexPosn (TFloat     p _) = p
+getAlexPosn (TComma     p) = p
+getAlexPosn (TLParen    p) = p
+getAlexPosn (TRParen    p) = p
+getAlexPosn (TLBrace    p) = p
+getAlexPosn (TRBrace    p) = p
+getAlexPosn (TLBrack    p) = p
+getAlexPosn (TRBrack    p) = p
+getAlexPosn (TColon     p) = p
+getAlexPosn (TSemiColon p) = p
+getAlexPosn (TPlus      p) = p
+getAlexPosn (TMinus     p) = p
+getAlexPosn (TMult      p) = p
+getAlexPosn (TDiv       p) = p
+getAlexPosn (TDot       p) = p
+getAlexPosn (TEq        p) = p
+getAlexPosn (TEqEq      p) = p
+getAlexPosn (TNeq       p) = p
+getAlexPosn (TLt        p) = p
+getAlexPosn (TLe        p) = p
+getAlexPosn (TGt        p) = p
+getAlexPosn (TGe        p) = p
+getAlexPosn (TAnd       p) = p
+getAlexPosn (TOr        p) = p
+getAlexPosn (TIf        p) = p
+getAlexPosn (TThen      p) = p
+getAlexPosn (TElse      p) = p
+getAlexPosn (TEnd       p) = p
+getAlexPosn (TDo        p) = p
+getAlexPosn (TWhile     p) = p
+getAlexPosn (TSkip      p) = p
+getAlexPosn (TTrue      p) = p
+getAlexPosn (TFalse     p) = p
+getAlexPosn (TSample    p) = p
+getAlexPosn (TLaplace   p) = p
 }

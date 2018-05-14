@@ -2,4 +2,12 @@ x :[2.0] int;
 y :[3.0] int;
 z :      int;
 
-z = x * y
+z = x * y;
+z[x] = y;
+z[y] = x;
+
+if z then
+  x = y
+else
+  y = x
+end

@@ -13,9 +13,9 @@ import Prelude hiding (LT, GT, EQ)
 %error     { parseError }
 
 %token
-  ident    { TIdent _ $$ }
-  int      { TInt   _ $$ }
-  float    { TFloat _ $$ }
+  ident    { TIdent _ _ }
+  int      { TInt   _ _ }
+  float    { TFloat _ _ }
   ','      { TComma _    }
   '('      { TLParen _   }
   ')'      { TRParen _   }
@@ -65,26 +65,26 @@ import Prelude hiding (LT, GT, EQ)
 %%
 
 Cmd
-  : skip                                      { CSkip }
-  | ident '=' Expr                            { CAssign  $1 $3 }
-  | ident '[' Expr ']' '=' Expr               { CAUpdate $1 $3 $6 }
-  | ident '$=' laplace '(' float ',' Expr ')' { CLaplace $1 $5 $7 }
-  | ident ':' LargeType                       { CDecl    $1 0 $3 }
-  | ident ':' '[' float ']' LargeType         { CDecl    $1 $4 $6 }
-  | if Expr then Cmd else Cmd end             { CIf      $2 $4 $6 }
-  | while Expr do Cmd end                     { CWhile   $2 $4 }
-  | Cmd ';' Cmd                               { CSeq     $1 $3 }
+  : skip                                      { CSkip    (token2Position $1) }
+  | ident '=' Expr                            { CAssign  (token2Position $2) (getIdent $1) $3 }
+  | ident '[' Expr ']' '=' Expr               { CAUpdate (token2Position $5) (getIdent $1) $3 $6 }
+  | ident '$=' laplace '(' float ',' Expr ')' { CLaplace (token2Position $2) (getIdent $1) (getFloat $5) $7 }
+  | ident ':' LargeType                       { CDecl    (token2Position $2) (getIdent $1) 0 $3 }
+  | ident ':' '[' float ']' LargeType         { CDecl    (token2Position $2) (getIdent $1) (getFloat $4) $6 }
+  | if Expr then Cmd else Cmd end             { CIf      (token2Position $1) $2 $4 $6 }
+  | while Expr do Cmd end                     { CWhile   (token2Position $1) $2 $4 }
+  | Cmd ';' Cmd                               { CSeq     (token2Position $2) $1 $3 }
 
 SmallType
-  : ident { case $1 of
+  : ident { case (getIdent $1) of
               "int"   -> STInt
               "float" -> STFloat
               "bool"  -> STBool
-              _       -> error $ "Unknown type: " ++ $1
+              x       -> error $ "Unknown type: " ++ x
           }
 
 LabelTypePair
-  : ident ':' SmallType { ($1, $3) }
+  : ident ':' SmallType { (getIdent $1, $3) }
 
 LabelTypePairs
   : LabelTypePair                    { [$1]    }
@@ -97,37 +97,37 @@ LargeType
   | '{' LargeType '}'      { LTBag $2 }
 
 Expr
-  : Literal                                  { ELit $1            }
-  | ident                                    { EVar $1            }
-  | Expr '+' Expr                            { EBinop $1 PLUS  $3 }
-  | Expr '-' Expr                            { EBinop $1 MINUS $3 }
-  | Expr '*' Expr                            { EBinop $1 MULT  $3 }
-  | Expr '/' Expr                            { EBinop $1 DIV   $3 }
-  | Expr '<' Expr                            { EBinop $1 LT    $3 }
-  | Expr '<=' Expr                           { EBinop $1 LE    $3 }
-  | Expr '>' Expr                            { EBinop $1 GT    $3 }
-  | Expr '>=' Expr                           { EBinop $1 GE    $3 }
-  | Expr '==' Expr                           { EBinop $1 EQ    $3 }
-  | Expr '!=' Expr                           { EBinop $1 NEQ   $3 }
-  | Expr '&&' Expr                           { EBinop $1 AND   $3 }
-  | Expr '||' Expr                           { EBinop $1 OR    $3 }
-  | Expr '[' Expr ']'                        { EIndex $1 $3       }
-  | Expr '{' ident '=' Expr '}'              { ERUpdate $1 $3 $5  }
-  | Expr '.' ident                           { ERAccess $1 $3     }
+  : Literal                                  { ELit (snd $1) (fst $1) }
+  | ident                                    { EVar (token2Position $1) (getIdent $1) }
+  | Expr '+' Expr                            { EBinop (token2Position $2) $1 PLUS  $3 }
+  | Expr '-' Expr                            { EBinop (token2Position $2) $1 MINUS $3 }
+  | Expr '*' Expr                            { EBinop (token2Position $2) $1 MULT  $3 }
+  | Expr '/' Expr                            { EBinop (token2Position $2) $1 DIV   $3 }
+  | Expr '<' Expr                            { EBinop (token2Position $2) $1 LT    $3 }
+  | Expr '<=' Expr                           { EBinop (token2Position $2) $1 LE    $3 }
+  | Expr '>' Expr                            { EBinop (token2Position $2) $1 GT    $3 }
+  | Expr '>=' Expr                           { EBinop (token2Position $2) $1 GE    $3 }
+  | Expr '==' Expr                           { EBinop (token2Position $2) $1 EQ    $3 }
+  | Expr '!=' Expr                           { EBinop (token2Position $2) $1 NEQ   $3 }
+  | Expr '&&' Expr                           { EBinop (token2Position $2) $1 AND   $3 }
+  | Expr '||' Expr                           { EBinop (token2Position $2) $1 OR    $3 }
+  | Expr '[' Expr ']'                        { EIndex (token2Position $2) $1 $3       }
+  | Expr '{' ident '=' Expr '}'              { ERUpdate (token2Position $2) $1 (getIdent $3) $5  }
+  | Expr '.' ident                           { ERAccess (token2Position $2) $1 (getIdent $3)     }
   | '(' Expr ')' %prec ATOM                  { $2 }
 
 SmallLiteral
-  : int   { SILit $ $1 }
-  | float { SFLit $ $1 }
-  | true  { SBLit True }
-  | false { SBLit False }
+  : int   { (SILit (getInt $1), token2Position $1) }
+  | float { (SFLit (getFloat $1), token2Position $1) }
+  | true  { (SBLit True, token2Position $1) }
+  | false { (SBLit False, token2Position $1) }
 
 Literal
-  : SmallLiteral              { SLit $1 }
-  | '{' LabelLiteralPairs '}' { RLit . RowLit $ fromList $2 }
+  : SmallLiteral              { (SLit (fst $1), snd $1) }
+  | '{' LabelLiteralPairs '}' { (RLit . RowLit $ fromList $2, token2Position $1) }
 
 LabelLiteralPair
-  : ident '=' SmallLiteral   { ($1, $3) }
+  : ident '=' SmallLiteral   { (getIdent $1, fst $3) }
 
 LabelLiteralPairs
   : LabelLiteralPair                       { [$1]    }
@@ -136,4 +136,18 @@ LabelLiteralPairs
 {
 parseError :: [Token] -> a
 parseError (tok : _) = error $ "Unexpected token: " ++ show tok
+
+token2Position :: Token -> Position
+token2Position tok =
+  let AlexPn _ line col = getAlexPosn tok
+  in Position line col
+
+getIdent (TIdent _ x) = x
+getIdent _ = error "Expecting an TIdent"
+
+getInt (TInt _ v) = v
+getInt _ = error "Expecting an TInt"
+
+getFloat (TFloat _ v) = v
+getFloat _ = error "Expecting an TFloat"
 }
