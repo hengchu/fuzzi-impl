@@ -1,13 +1,14 @@
-x :[2.0] int;
-y :[3.0] int;
-z :      int;
+tx :        int;
+ty :        int;
+i  :        int;
+xs :[1.0] { int };
+ys :      { int };
 
-z = x * y;
-z[x] = y;
-z[y] = x;
+r1 : { { foo : int, bar : int } };
+r2 : { foo : int, bar : int };
 
-if z then
-  x = y
-else
-  y = x
-end
+bmap(xs, ys, tx, i, ty, {
+  ty = tx * 2;
+});
+
+r1[0] = r2;

@@ -34,11 +34,14 @@ tcErrorIf cond posn err val =
   if cond then tcError posn err else pure val
 
 tcExpr :: Context -> Expr -> TcM LargeType
-tcExpr ctx = foldExprM tcVar tcLit tcBinop tcIndex tcRupdate tcRaccess
+tcExpr ctx = foldExprM tcVar tcLenVar tcLit tcBinop tcIndex tcRupdate tcRaccess tcClip
   where tcVar posn = \var ->
           case M.lookup var ctx of
             Nothing -> tcError posn $ "Unknown variable: " ++ var
             Just t -> return t
+
+        tcLenVar posn = \var ->
+          tcExpr ctx (desugarLenVar posn var)
 
         tcSmallLit = \case
           SILit _ -> STInt
@@ -49,9 +52,18 @@ tcExpr ctx = foldExprM tcVar tcLit tcBinop tcIndex tcRupdate tcRaccess
           SLit slit -> pure . LTSmall $ tcSmallLit slit
           RLit (RowLit rlit) -> pure . LTRow . RowType $ M.map tcSmallLit rlit
 
+        isNumericST = \case
+          STInt -> True
+          STFloat -> True
+          _ -> False
+
+        isNumericRT rt =
+          M.foldr (\t acc -> (isNumericST t) && acc) True rt
+
         isNumericLT = \case
           LTSmall STInt -> True
           LTSmall STFloat -> True
+          LTRow rt -> isNumericRT . getRowTypes $ rt
           _ -> False
 
         isSmallLT = \case
@@ -79,7 +91,8 @@ tcExpr ctx = foldExprM tcVar tcLit tcBinop tcIndex tcRupdate tcRaccess
             MULT  -> tcErrorIf (not $ isNumericLT tl) posn arithOpTcError tl
             DIV   -> tcErrorIf (not $ isNumericLT tl) posn arithOpTcError tl
 
-        tcIndex posn = \tarr tidx ->
+        tcIndex posn = \varr tidx -> do
+          tarr <- tcVar posn varr
           case (tarr, tidx) of
             (LTArray t, LTSmall STInt) -> return . LTSmall $ t
             (LTBag t, LTSmall STInt) -> return t
@@ -106,8 +119,16 @@ tcExpr ctx = foldExprM tcVar tcLit tcBinop tcIndex tcRupdate tcRaccess
             Nothing -> tcError posn $ label ++ " doesn't exist"
             Just t  -> return . LTSmall $ t
 
+        tcClip posn = \tv lit -> do
+          tlit <- tcExpr ctx (ELit posn lit)
+          when (tv /= tlit) $
+            tcError posn $ clipTcError
+          when (not $ isNumericLT tv) $
+            tcError posn "Clip can only be applied to numeric types"
+          return tv
+
 tcCmdTopLevelDecls :: Cmd -> TcM Context
-tcCmdTopLevelDecls = foldCmdM tcCassign tcCAupdate tcClaplace tcCif tcCwhile tcCdecl tcCseq tcCskip
+tcCmdTopLevelDecls = foldCmdM tcCassign tcCAupdate tcClaplace tcCif tcCwhile tcCdecl tcCseq tcCskip tcBmap tcAmap tcBsum
   where
     tcCassign _ _ _ = pure empty
 
@@ -119,7 +140,12 @@ tcCmdTopLevelDecls = foldCmdM tcCassign tcCAupdate tcClaplace tcCif tcCwhile tcC
 
     tcCwhile _ _ _ = pure empty
 
-    tcCdecl _ x _ t = pure $ M.singleton x t
+    tcCdecl _ x _ t =
+      case t of
+        LTSmall _ -> pure $ M.singleton x t
+        LTRow   _ -> pure $ M.singleton x t
+        LTArray _ -> pure $ M.fromList [(x, t), (lenVarName x, LTSmall STInt)]
+        LTBag   _ -> pure $ M.fromList [(x, t), (lenVarName x, LTSmall STInt)]
 
     tcCseq posn m1 m2 = do
       let multiDeclVars = M.intersection m1 m2
@@ -129,8 +155,15 @@ tcCmdTopLevelDecls = foldCmdM tcCassign tcCAupdate tcClaplace tcCif tcCwhile tcC
 
     tcCskip _ = return empty
 
+    tcBmap _ _ _ _ _ _ _ = return empty
+
+    tcAmap _ _ _ _ _ _ _ = return empty
+
+    tcBsum _ _ _ _ _ _ = return empty
+
 tcCmd' :: Context -> Cmd -> TcM ()
-tcCmd' ctx c = foldCmdA tcCassign tcCAupdate tcClaplace tcCif tcCwhile tcCdecl tcCseq tcCskip c
+tcCmd' ctx c =
+  foldCmdA tcCassign tcCAupdate tcClaplace tcCif tcCwhile tcCdecl tcCseq tcCskip tcBmap tcAmap tcBsum c
   where
     lookupVar posn x =
       case M.lookup x ctx of
@@ -178,10 +211,16 @@ tcCmd' ctx c = foldCmdA tcCassign tcCAupdate tcClaplace tcCif tcCwhile tcCdecl t
 
     tcCskip _ = return ()
 
+    tcBmap posn _ _ _ _ _ _ = tcError posn "Bagmap should have been desugared"
+
+    tcAmap posn _ _ _ _ _ _ = tcError posn "Arraymap should have been desugared"
+
+    tcBsum posn _ _ _ _ _ = tcError posn "Bagsum should have been desugared"
+
 tcCmd :: Cmd -> TcM Context
 tcCmd c = do
   ctx <- tcCmdTopLevelDecls c
-  tcCmd' ctx c
+  tcCmd' ctx (desugar c)
   return ctx
 
 -- |Various error messages.
@@ -195,7 +234,10 @@ eqOpTcError :: Error
 eqOpTcError = "Equality testing can only be applied between primitives and records"
 
 arithOpTcError :: Error
-arithOpTcError = "Arithmetic operators can only be applied between primitives"
+arithOpTcError = "Arithmetic operators can only be applied between numeric types"
+
+clipTcError :: Error
+clipTcError = "Bound and value are different types"
 
 multiDeclTcError :: Context -> Error
 multiDeclTcError multiDecls =

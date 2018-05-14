@@ -42,7 +42,13 @@ $eol                          ;
 "$="                          { \p _ -> TSample p }
 "=="                          { \p _ -> TEqEq p }
 "="                           { \p _ -> TEq p }
+"bmap"                        { \p _ -> TBMap p }
+"amap"                        { \p _ -> TAMap p }
+"bsum"                        { \p _ -> TBSum p }
+"partition"                   { \p _ -> TPartition p }
 "lap"                         { \p _ -> TLaplace p }
+"length"                      { \p _ -> TLength p }
+"clip"                        { \p _ -> TClip p }
 "true"                        { \p _ -> TTrue p }
 "false"                       { \p _ -> TFalse p }
 "if"                          { \p _ -> TIf p }
@@ -95,6 +101,12 @@ data Token = TIdent     AlexPosn String
            | TFalse     AlexPosn
            | TSample    AlexPosn
            | TLaplace   AlexPosn
+           | TBMap      AlexPosn
+           | TAMap      AlexPosn
+           | TBSum      AlexPosn
+           | TPartition AlexPosn
+           | TLength    AlexPosn
+           | TClip      AlexPosn
   deriving (Show, Eq)
 
 getAlexPosn :: Token -> AlexPosn
@@ -135,4 +147,10 @@ getAlexPosn (TTrue      p) = p
 getAlexPosn (TFalse     p) = p
 getAlexPosn (TSample    p) = p
 getAlexPosn (TLaplace   p) = p
+getAlexPosn (TBMap      p) = p
+getAlexPosn (TAMap      p) = p
+getAlexPosn (TBSum      p) = p
+getAlexPosn (TPartition p) = p
+getAlexPosn (TLength    p) = p
+getAlexPosn (TClip      p) = p
 }
