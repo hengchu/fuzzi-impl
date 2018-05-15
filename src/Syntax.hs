@@ -215,6 +215,40 @@ foldExprM fvar flenvar flit fbinop findex frupdate fraccess fclip e =
       fclip posn acc bound
   where recur = foldExprM fvar flenvar flit fbinop findex frupdate fraccess fclip
 
+foldCmd :: (Position -> String -> Expr -> a)
+        -> (Position -> String -> Expr -> Expr -> a)
+        -> (Position -> String -> Float -> Expr -> a)
+        -> (Position -> Expr -> a -> a -> a)
+        -> (Position -> Expr -> a -> a)
+        -> (Position -> String -> Float -> LargeType -> a)
+        -> (Position -> a -> a -> a)
+        -> (Position -> a)
+        -> (Position -> String -> String -> String -> String -> String -> a -> a)
+        -> (Position -> String -> String -> String -> String -> String -> a -> a)
+        -> (Position -> String -> String -> String -> String -> Literal -> a)
+        -> Cmd
+        -> a
+foldCmd fassign faupdate flaplace fif fwhile fdecl fseq fskip fbmap famap fbsum c =
+  case c of
+    CAssign  posn x e -> fassign posn x e
+    CAUpdate posn x eidx eval -> faupdate posn x eidx eval
+    CLaplace posn x width mean -> flaplace posn x width mean
+    CIf posn e ct cf ->
+      fif posn e (recur ct) (recur cf)
+    CWhile posn e cbody ->
+      fwhile posn e (recur cbody)
+    CDecl posn x s t -> fdecl posn x s t
+    CSeq posn c1 c2 ->
+      fseq posn (recur c1) (recur c2)
+    CSkip posn -> fskip posn
+    CBMap posn invar outvar tvar ivar outtemp mapCmd ->
+      fbmap posn invar outvar tvar ivar outtemp (recur mapCmd)
+    CAMap posn invar outvar tvar ivar outtemp mapCmd ->
+      famap posn invar outvar tvar ivar outtemp (recur mapCmd)
+    CBSum posn invar outvar tvar ivar bound ->
+      fbsum posn invar outvar tvar ivar bound
+  where recur = foldCmd fassign faupdate flaplace fif fwhile fdecl fseq fskip fbmap famap fbsum
+
 foldCmdA :: (Applicative f)
          => (Position -> String -> Expr -> f a)
          -> (Position -> String -> Expr -> Expr -> f a)

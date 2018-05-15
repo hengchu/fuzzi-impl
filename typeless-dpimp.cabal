@@ -36,12 +36,14 @@ library
       base >=4.7 && <5
       , containers
       , array
+      , mtl
   exposed-modules:
       Lib
       , Syntax
       , Lexer
       , Parser
-      , Typechecker.Basic          
+      , Typechecker.Basic
+      , Typechecker.InfFlow
   build-tools:
       alex, happy
   other-modules:
