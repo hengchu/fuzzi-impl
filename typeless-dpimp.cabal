@@ -37,6 +37,7 @@ library
       , containers
       , array
       , mtl
+      , logfloat
   exposed-modules:
       Lib
       , Syntax
@@ -44,6 +45,7 @@ library
       , Parser
       , Typechecker.Basic
       , Typechecker.InfFlow
+      , Typechecker.Sensitivity
   build-tools:
       alex, happy
   other-modules:

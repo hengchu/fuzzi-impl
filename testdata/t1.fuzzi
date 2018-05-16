@@ -4,11 +4,15 @@ i  :        int;
 xs :[1.0] { int };
 ys :      { int };
 
-r1 : { { foo : int, bar : int } };
-r2 : { foo : int, bar : int };
+xs1 :[1.0] [ int ];
+ys1 :      [ int ];
 
 bmap(xs, ys, tx, i, ty, {
   ty = tx * 2;
 });
 
-r1[0] = r2;
+amap(xs1, ys1, tx, i, ty, {
+  ty = tx * 2;
+});
+
+bsum(xs, tx, ty, i, 2);
