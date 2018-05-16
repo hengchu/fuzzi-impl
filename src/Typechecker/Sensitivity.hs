@@ -64,13 +64,14 @@ instance Fractional Sensitivity where
 
 type Context = Map String Sensitivity
 
-checkExpr :: Context -> Expr -> Sensitivity
-checkExpr ctx =
-  foldExpr checkVar checkLenVar checkLit checkBinop checkIndex checkRupdate checkRaccess checkClipS
+checkExpr :: TB.Context -> Context -> Expr -> Sensitivity
+checkExpr _ ctx =
+  foldExpr checkVar checkLength checkLit checkBinop checkIndex checkRupdate checkRaccess checkClipS
   where
     checkVar _ x = ctx ! x
 
-    checkLenVar _ x = ctx ! (lenVarName x)
+    -- TODO: fix this for arrays
+    checkLength _ s = s
 
     checkLit _ lit =
       case lit of
@@ -122,10 +123,10 @@ checkClipS _ _ bound =
 
 freeVars :: Expr -> S.Set String
 freeVars =
-  foldExpr checkVar checkLenVar checkLit checkBinop checkIndex checkRupdate checkRaccess checkClip
+  foldExpr checkVar checkLength checkLit checkBinop checkIndex checkRupdate checkRaccess checkClip
   where
     checkVar _ x = S.singleton x
-    checkLenVar _ x = S.singleton . lenVarName $ x
+    checkLength _ fvs = fvs
     checkLit _ _ = S.empty
     checkBinop _ sl _ sr = S.union sl sr
     checkIndex _ x sidx = S.insert x sidx
@@ -147,6 +148,7 @@ checkToplevelDecl =
     checkBmap
     checkAmap
     checkBsum
+    checkPartition
   where checkAssign _ _ _ = empty
         checkAupdate _ _ _ _ = empty
         checkLaplace _ _ _ _ = empty
@@ -163,6 +165,7 @@ checkToplevelDecl =
         checkBmap _ _ _ _ _ _ _ = empty
         checkAmap _ _ _ _ _ _ _ = empty
         checkBsum _ _ _ _ _ _ = empty
+        checkPartition _ _ _ _ _ _ _ = empty
 
 readVars :: Cmd -> S.Set String
 readVars (CAssign _ _ rhs) = freeVars rhs
@@ -176,13 +179,13 @@ readVars (CSkip _) = S.empty
 readVars c = readVars . desugar $ c
 
 checkCmd' :: TB.Context -> Cmd -> (Context, S.Set String) -> (Context, S.Set String, Float)
-checkCmd' _ (CAssign _ x e) = \(ctx, mvs) ->
-  (M.insert x (checkExpr ctx e) ctx, S.insert x mvs, 0)
+checkCmd' bctxt (CAssign _ x e) = \(ctx, mvs) ->
+  (M.insert x (checkExpr bctxt ctx e) ctx, S.insert x mvs, 0)
 checkCmd' bctxt (CAUpdate _ x eidx erhs) = \(ctx, mvs) ->
   let tx = bctxt ! x
       mvs' = S.insert x mvs
-      sidx = checkExpr ctx eidx
-      srhs = checkExpr ctx erhs
+      sidx = checkExpr bctxt ctx eidx
+      srhs = checkExpr bctxt ctx erhs
   in case tx of
        LTArray _ ->
          if sidx > 0
@@ -198,7 +201,7 @@ checkCmd' bctxt (CAUpdate _ x eidx erhs) = \(ctx, mvs) ->
        _ -> error $ "Impossible: array update on non-array/non-bag type, "
                     ++ "this should have been caught by basic typechecker"
 checkCmd' bctxt (CLaplace _ x width e) = \(ctx, mvs) ->
-  let s = checkExpr ctx e
+  let s = checkExpr bctxt ctx e
       mvs' = S.insert x mvs
       tx = bctxt ! x
   in case tx of
@@ -209,7 +212,7 @@ checkCmd' bctxt (CLaplace _ x width e) = \(ctx, mvs) ->
        _ -> error $ "Impossible: laplace mechanism should only be applied to numeric variables, "
                     ++ "this should have been caught by basic typechecker"
 checkCmd' bctxt (CIf _ e ct cf) = \(ctx, mvs) ->
-  let s = checkExpr ctx e
+  let s = checkExpr bctxt ctx e
       (ctxt, mvst, ept) = checkCmd' bctxt ct (ctx, mvs)
       (ctxf, mvsf, epf) = checkCmd' bctxt cf (ctx, mvs)
       ctx' = M.unionWith max ctxt ctxf
@@ -271,6 +274,8 @@ checkCmd' bctxt cmd@(CBSum posn invar outvar _ _ bound) = \(ctx, mvs) ->
   let sout = checkClipS posn (ctx ! invar) bound
       (ctx', mvs', _) = checkCmd' bctxt (desugar cmd) (ctx, mvs)
   in (M.insert outvar sout ctx', mvs', 0)
+-- TODO: fix this
+checkCmd' bctxt cmd@(CPartition _ _ _ _ _ _ _) = undefined
 
 checkCmd :: Cmd -> Either [TB.Error] (Context, Epsilon)
 checkCmd c =

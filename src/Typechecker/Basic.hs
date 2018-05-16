@@ -34,14 +34,17 @@ tcErrorIf cond posn err val =
   if cond then tcError posn err else pure val
 
 tcExpr :: Context -> Expr -> TcM LargeType
-tcExpr ctx = foldExprM tcVar tcLenVar tcLit tcBinop tcIndex tcRupdate tcRaccess tcClip
+tcExpr ctx = foldExprM tcVar tcLength tcLit tcBinop tcIndex tcRupdate tcRaccess tcClip
   where tcVar posn = \var ->
           case M.lookup var ctx of
             Nothing -> tcError posn $ "Unknown variable: " ++ var
             Just t -> return t
 
-        tcLenVar posn = \var ->
-          tcExpr ctx (desugarLenVar posn var)
+        tcLength posn = \t -> do
+          case t of
+            LTRow _ -> tcError posn $ lengthTcError
+            LTSmall _ -> tcError posn $ lengthTcError
+            _ -> return $ LTSmall STInt
 
         tcSmallLit = \case
           SILit _ -> STInt
@@ -128,7 +131,7 @@ tcExpr ctx = foldExprM tcVar tcLenVar tcLit tcBinop tcIndex tcRupdate tcRaccess 
           return tv
 
 tcCmdTopLevelDecls :: Cmd -> TcM Context
-tcCmdTopLevelDecls = foldCmdM tcCassign tcCAupdate tcClaplace tcCif tcCwhile tcCdecl tcCseq tcCskip tcBmap tcAmap tcBsum
+tcCmdTopLevelDecls = foldCmdM tcCassign tcCAupdate tcClaplace tcCif tcCwhile tcCdecl tcCseq tcCskip tcBmap tcAmap tcBsum tcPartition
   where
     tcCassign _ _ _ = pure empty
 
@@ -161,9 +164,24 @@ tcCmdTopLevelDecls = foldCmdM tcCassign tcCAupdate tcClaplace tcCif tcCwhile tcC
 
     tcBsum _ _ _ _ _ _ = return empty
 
+    tcPartition _ _ _ _ _ _ _ = return empty
+
 tcCmd' :: Context -> Cmd -> TcM ()
 tcCmd' ctx c =
-  foldCmdA tcCassign tcCAupdate tcClaplace tcCif tcCwhile tcCdecl tcCseq tcCskip tcBmap tcAmap tcBsum c
+  foldCmdA
+    tcCassign
+    tcCAupdate
+    tcClaplace
+    tcCif
+    tcCwhile
+    tcCdecl
+    tcCseq
+    tcCskip
+    tcBmap
+    tcAmap
+    tcBsum
+    tcPartition
+    c
   where
     lookupVar posn x =
       case M.lookup x ctx of
@@ -217,6 +235,8 @@ tcCmd' ctx c =
 
     tcBsum posn _ _ _ _ _ = tcError posn "Bagsum should have been desugared"
 
+    tcPartition posn _ _ _ _ _ _ = tcError posn "Partition should have been desugared"
+
 tcCmd :: Cmd -> TcM Context
 tcCmd c = do
   ctx <- tcCmdTopLevelDecls c
@@ -262,3 +282,6 @@ arrayUpdateTcError var idx rhs =
 
 condNotBoolTcError :: Expr -> Error
 condNotBoolTcError econd = "Condition expression: " ++ show econd ++ " is not a boolean"
+
+lengthTcError :: Error
+lengthTcError = "length() can only be applied to array or bag expressions"

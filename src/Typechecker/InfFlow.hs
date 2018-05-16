@@ -17,11 +17,11 @@ approx inf1 inf2 = inf1 || inf2
 
 checkExpr :: Context -> Expr -> Bool
 checkExpr ctx e =
-  foldExpr checkVar checkLenVar checkLit checkBinop checkIndex checkRupdate checkRaccess checkClip e
+  foldExpr checkVar checkLength checkLit checkBinop checkIndex checkRupdate checkRaccess checkClip e
   where
     checkVar _ x = ctx ! x
 
-    checkLenVar _ x = ctx ! (lenVarName x)
+    checkLength _ se = se
 
     checkLit _ _ = False
 
@@ -53,6 +53,7 @@ checkToplevelDecl c =
     checkBmap
     checkAmap
     checkBsum
+    checkPartition
     c
   where checkAssign _ _ _ = empty
         checkAupdate _ _ _ _ = empty
@@ -70,6 +71,7 @@ checkToplevelDecl c =
         checkBmap _ _ _ _ _ _ _ = empty
         checkAmap _ _ _ _ _ _ _ = empty
         checkBsum _ _ _ _ _ _ = empty
+        checkPartition _ _ _ _ _ _ _ = empty
 
 checkCmd' :: Cmd -> (Context, S.Set String) -> (Context, S.Set String)
 checkCmd' (CAssign _ x e) =

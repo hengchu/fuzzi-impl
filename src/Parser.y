@@ -101,6 +101,15 @@ Cmd
       }
   | bsum '(' ident ',' ident ',' ident ',' ident ',' Literal ')'
       { CBSum (token2Position $1) (getIdent $3) (getIdent $5) (getIdent $7) (getIdent $9) (fst $11) }
+  | partition '(' ident ',' ident ',' ident ',' ident ',' ident ',' '{' Cmd '}' ')'
+      { CPartition (token2Position $1)
+                   (getIdent $3)
+                   (getIdent $5)
+                   (getIdent $7)
+                   (getIdent $9)
+                   (getIdent $11)
+                   $14
+      }
 
 SmallType
   : ident { case (getIdent $1) of
@@ -126,7 +135,7 @@ LargeType
 Expr
   : Literal                                  { ELit (snd $1) (fst $1) }
   | ident                                    { EVar (token2Position $1) (getIdent $1) }
-  | length '(' ident ')'                     { ELenVar (token2Position $1) (getIdent $1) }
+  | length '(' Expr ')'                      { ELength (token2Position $1) $3 }
   | Expr '+' Expr                            { EBinop (token2Position $2) $1 PLUS  $3 }
   | Expr '-' Expr                            { EBinop (token2Position $2) $1 MINUS $3 }
   | Expr '*' Expr                            { EBinop (token2Position $2) $1 MULT  $3 }
