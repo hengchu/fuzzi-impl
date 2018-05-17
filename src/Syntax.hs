@@ -103,6 +103,8 @@ desugar c =
       -> desugarAMap posn invar outvar tvar ivar outtemp cmd
     CBSum  posn invar outvar tvar ivar bound
       -> desugarBSum posn invar outvar tvar ivar bound
+    CPartition posn invar outvar tvar ivar outindex cmd
+      -> desugarPartition posn invar outvar tvar ivar outindex cmd
     CWhile posn e cmd -> CWhile posn e (desugar cmd)
     CSeq posn c1 c2 -> CSeq posn (desugar c1) (desugar c2)
     CIf posn e ct cf -> CIf posn e (desugar ct) (desugar cf)

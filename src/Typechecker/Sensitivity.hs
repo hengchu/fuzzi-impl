@@ -42,7 +42,6 @@ instance Num Sensitivity where
   (S s)   + (C _)  = S s
   c@(C _) + s@(S _) = s + c
 
-
   s1@(S _) * s2@(S _) = approx s1 s2
   (C c)    * (C c')   = C (c * c')
   (S s)    * (C c)    = S (s * c)
@@ -296,11 +295,11 @@ checkCmd' bctxt cmd@(CBMap _ invar outvar tvar ivar outtemp c) = \(ctx, mvs) ->
 
       deterministic = ep == 0
       onlySensVarModified = scmvs `S.isSubsetOf` (S.fromList [outtemp])
-      onlyUsesTandI = cInputs `S.isSubsetOf` (S.fromList [tvar, ivar])
+      onlyUsesT = cInputs `S.isSubsetOf` (S.fromList [tvar])
 
-  in if deterministic && onlySensVarModified && onlyUsesTandI
+  in if deterministic && onlySensVarModified && onlyUsesT
      then (M.insert outvar (ctx ! invar) ctx', mvs', 0)
-     else (ctx', mvs', ep)
+     else (ctx', mvs', infinity)
 checkCmd' bctxt cmd@(CAMap _ invar outvar tvar ivar outtemp c) = \(ctx, mvs) ->
   let desugaredCmd = desugar cmd
 
@@ -317,15 +316,28 @@ checkCmd' bctxt cmd@(CAMap _ invar outvar tvar ivar outtemp c) = \(ctx, mvs) ->
 
   in if deterministic && onlySensVarModified && onlyUsesTandI
      then (M.insert outvar (cctx ! outtemp) ctx', mvs', 0)
-     else (ctx', mvs', ep)
+     else (ctx', mvs', infinity)
 checkCmd' bctxt cmd@(CBSum posn invar outvar _ _ bound) = \(ctx, mvs) ->
   let sout = checkClipS posn (ctx ! invar) bound
       (ctx', mvs', _) = checkCmd' bctxt (desugar cmd) (ctx, mvs)
   in (M.insert outvar sout ctx', mvs', 0)
 checkCmd'
   bctxt
-  cmd@(CPartition posn invar outvar tvar ivar outindex partCmd) = \(ctx, mvs) ->
-  undefined
+  cmd@(CPartition _ invar outvar tvar ivar outindex partCmd) = \(ctx, mvs) ->
+  let desugaredCmd = desugar cmd
+      (ctx', mvs', _)  = checkCmd' bctxt desugaredCmd (ctx, mvs)
+      (cctx, cmvs, ep) = checkCmd' bctxt partCmd (M.insert tvar (S infinity) .
+                                                  M.insert ivar (S infinity) $
+                                                  ctx, S.empty)
+      scmvs = S.filter (\x -> cctx ! x > 0) cmvs
+      cInputs = readVars partCmd
+
+      deterministic = ep == 0
+      onlySensVarModified = scmvs `S.isSubsetOf` (S.fromList [outindex])
+      onlyUsesT = cInputs `S.isSubsetOf` (S.fromList [tvar])
+  in if deterministic && onlySensVarModified && onlyUsesT
+     then (M.insert outvar (C 2 * ctx ! invar) ctx', mvs', 0)
+     else (ctx', mvs', infinity)
 
 checkCmd :: Cmd -> Either [TB.Error] (Context, Epsilon)
 checkCmd c =

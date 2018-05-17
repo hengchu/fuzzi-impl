@@ -15,4 +15,11 @@ amap(xs1, ys1, tx, i, ty, {
   ty = tx * 2;
 });
 
-zs :[1.0] { { int } };
+zs :[1.0] { int };
+zs2 : { { int } };
+
+j : int;
+
+partition(zs, zs2, tx, i, j, {
+  j = tx * 2;
+});
