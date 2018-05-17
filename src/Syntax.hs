@@ -16,7 +16,7 @@ data LargeType = LTSmall SmallType
   deriving (Show, Eq)
 
 data Binop = LT | LE | GT | GE | AND | OR | EQ | NEQ | PLUS | MINUS | MULT | DIV
-  deriving (Show, Eq)
+  deriving (Show, Eq, Ord)
 
 data SmallLit = SILit Int
               | SFLit Float
@@ -167,7 +167,7 @@ desugarPartition posn invar outvar tvar ivar outindex partCmd =
           `cseq`
           CAUpdate posn
                    partExpr
-                   (EBinop posn partLenExpr MINUS (intLit posn (-1)))
+                   (EBinop posn partLenExpr MINUS (intLit posn 1))
                    (EVar posn tvar)
 
 foldExpr :: (Position -> String -> a)

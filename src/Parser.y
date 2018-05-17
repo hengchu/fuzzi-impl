@@ -60,10 +60,10 @@ import Prelude hiding (LT, GT, EQ)
 %right ';'
 %left '.'
 %left '[' '{'
-%nonassoc '<' '<=' '>' '>='
 %left '||'
 %left '&&'
 %nonassoc '==' '!='
+%nonassoc '<' '<=' '>' '>='
 %left '+' '-'
 %left '*' '/'
 %nonassoc ATOM

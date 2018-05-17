@@ -1,4 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DeriveGeneric #-}
 
 module Typechecker.Sensitivity where
 
@@ -6,6 +8,8 @@ import Prelude hiding (LT, EQ, GT, isInfinite)
 
 import Syntax
 
+import GHC.Generics
+import Data.Data
 import Data.Map
 import Data.Map as M
 import qualified Data.Set as S
@@ -16,7 +20,7 @@ import Data.Number.Transfinite
 -- types.
 data Sensitivity = C Float
                  | S Float
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Data, Generic)
 
 type Epsilon = Float
 
