@@ -2,7 +2,7 @@
 
 module Typechecker.Sensitivity where
 
-import Prelude hiding (LT, EQ, GT)
+import Prelude hiding (LT, EQ, GT, isInfinite)
 
 import Syntax
 
@@ -65,43 +65,63 @@ instance Fractional Sensitivity where
 type Context = Map String Sensitivity
 
 checkExpr :: TB.Context -> Context -> Expr -> Sensitivity
-checkExpr _ ctx =
-  foldExpr checkVar checkLength checkLit checkBinop checkIndex checkRupdate checkRaccess checkClipS
+checkExpr bctxt ctx e =
+  fst $ foldExpr checkVar checkLength checkLit checkBinop checkIndex checkRupdate checkRaccess checkClip e
   where
-    checkVar _ x = ctx ! x
+    checkVar _ x = (ctx ! x, bctxt ! x)
 
-    -- TODO: fix this for arrays
-    checkLength _ s = s
+    checkLength _ (s, t) =
+      case t of
+        LTArray _ ->
+          case s of
+            C _    -> (S 0, LTSmall STInt)
+            S sval -> if isInfinite sval
+                      then (S infinity, LTSmall STInt)
+                      else (S 0,        LTSmall STInt)
+        LTBag   _ -> (s,   LTSmall STInt)
+        _ -> error "Impossible: length() is applied to an expression that's not bag/array"
 
     checkLit _ lit =
-      case lit of
-        SLit (SILit c) -> C . fromIntegral $ c
-        SLit (SFLit c) -> C c
-        _ -> S 0
+      let Right tlit = TB.runTcM $ TB.tcExpr bctxt (ELit undefined lit)
+      in case lit of
+           SLit (SILit c) -> (C . fromIntegral $ c, tlit)
+           SLit (SFLit c) -> (C c, tlit)
+           _ -> (S 0, tlit)
 
-    checkBinop _ sl op sr =
+    checkBinop _ (sl, tl) op (sr, _) =
       case op of
-        LT  -> approx sl sr
-        LE  -> approx sl sr
-        GT  -> approx sl sr
-        GE  -> approx sl sr
-        AND -> approx sl sr
-        OR  -> approx sl sr
-        EQ  -> approx sl sr
-        NEQ -> approx sl sr
-        PLUS -> sl + sr
-        MINUS -> sl + sr
-        MULT -> sl * sr
-        DIV -> sl / sr
+        LT  -> (approx sl sr, LTSmall STBool)
+        LE  -> (approx sl sr, LTSmall STBool)
+        GT  -> (approx sl sr, LTSmall STBool)
+        GE  -> (approx sl sr, LTSmall STBool)
+        AND -> (approx sl sr, LTSmall STBool)
+        OR  -> (approx sl sr, LTSmall STBool)
+        EQ  -> (approx sl sr, LTSmall STBool)
+        NEQ -> (approx sl sr, LTSmall STBool)
+        PLUS -> (sl + sr, tl)
+        MINUS -> (sl + sr, tl)
+        MULT -> (sl * sr, tl)
+        DIV -> (sl / sr, tl)
 
-    checkIndex _ x sidx =
-      approx (ctx ! x) sidx
+    checkIndex _ (sarr, tarr) (sidx, _) =
+      case tarr of
+        LTArray t -> (approx sarr sidx, LTSmall t)
+        LTBag   t -> (approx sarr sidx, t)
+        _ -> error "Impossible: index on a non bag/array type"
 
-    checkRupdate _ srec _ svalue =
-      approx srec svalue
+    checkRupdate _ (srec, trec) _ (svalue, _) =
+      (approx srec svalue, trec)
 
-    checkRaccess _ srec _ =
-      srec
+    checkRaccess _ (srec, trec) label =
+      case trec of
+        LTRow trec' ->
+          (srec, LTSmall $ getRowTypes trec' ! label)
+        _ -> error "Impossible: record access on a non record type"
+
+    checkClip posn (s, _) bound =
+      let s' = checkClipS posn s bound
+          Right t = TB.runTcM $ TB.tcExpr bctxt (ELit undefined bound)
+      in (s', t)
 
 scaleST :: SmallLit -> Sensitivity
 scaleST = \case
@@ -129,7 +149,7 @@ freeVars =
     checkLength _ fvs = fvs
     checkLit _ _ = S.empty
     checkBinop _ sl _ sr = S.union sl sr
-    checkIndex _ x sidx = S.insert x sidx
+    checkIndex _ sarr sidx = S.union sarr sidx
     checkRupdate _ sr _ sv = S.union sr sv
     checkRaccess _ sr _ = sr
     checkClip _ s _ = s
@@ -139,6 +159,7 @@ checkToplevelDecl =
   foldCmd
     checkAssign
     checkAupdate
+    checkLupdate
     checkLaplace
     checkIf
     checkWhile
@@ -151,15 +172,11 @@ checkToplevelDecl =
     checkPartition
   where checkAssign _ _ _ = empty
         checkAupdate _ _ _ _ = empty
+        checkLupdate _ _ _ = empty
         checkLaplace _ _ _ _ = empty
         checkIf _ _ _ _ = empty
         checkWhile _ _ _ = empty
-        checkDecl _ x s t =
-          case t of
-            LTSmall _ -> M.singleton x (S s)
-            LTBag _ -> M.fromList [(x, S s), (lenVarName x, S s)]
-            LTArray _ -> M.fromList [(x, S s), (lenVarName x, 0)]
-            LTRow _ -> M.singleton x (S s)
+        checkDecl _ x s _ = M.singleton x (S s)
         checkSeq _ ctx1 ctx2 = M.union ctx2 ctx1
         checkSkip _ = empty
         checkBmap _ _ _ _ _ _ _ = empty
@@ -181,8 +198,9 @@ readVars c = readVars . desugar $ c
 checkCmd' :: TB.Context -> Cmd -> (Context, S.Set String) -> (Context, S.Set String, Float)
 checkCmd' bctxt (CAssign _ x e) = \(ctx, mvs) ->
   (M.insert x (checkExpr bctxt ctx e) ctx, S.insert x mvs, 0)
-checkCmd' bctxt (CAUpdate _ x eidx erhs) = \(ctx, mvs) ->
-  let tx = bctxt ! x
+checkCmd' bctxt (CAUpdate _ earr eidx erhs) = \(ctx, mvs) ->
+  let x = indexedVar earr
+      tx = bctxt ! x
       mvs' = S.insert x mvs
       sidx = checkExpr bctxt ctx eidx
       srhs = checkExpr bctxt ctx erhs
@@ -200,6 +218,33 @@ checkCmd' bctxt (CAUpdate _ x eidx erhs) = \(ctx, mvs) ->
            else (M.insert       x 0 ctx, mvs', 0)
        _ -> error $ "Impossible: array update on non-array/non-bag type, "
                     ++ "this should have been caught by basic typechecker"
+checkCmd' bctxt (CLUpdate _ lhs rhs) = \(ctx, mvs) ->
+  let srhs = checkExpr bctxt ctx rhs
+      maybeX = getLengthVar lhs
+      mv = indexedVar lhs
+      tmv = bctxt ! mv
+  in case (maybeX, tmv) of
+       (_, LTArray _) ->
+         if srhs > 0
+         then (M.insert mv (S infinity) ctx, S.insert mv mvs, 0)
+         else (ctx, S.insert mv mvs, 0)
+       (Just x, LTBag _) ->
+         if srhs > 0
+         then (M.adjust (+ srhs) x ctx, S.insert mv mvs, 0)
+         else (ctx, S.insert mv mvs, 0)
+       (Nothing, LTBag _) ->
+         if srhs > 0
+         then (M.adjust (+ 1) mv ctx, S.insert mv mvs, 0)
+         else (ctx, S.insert mv mvs, 0)
+       _ ->
+         error $ "Impossible: length() update is applied to an"
+                 ++ " expression that's not array/bag, this should"
+                 ++ " haven been caught by the basic typechecker"
+  where
+    -- This function searches for a potential array/bag variable whose length is
+    -- being updated.
+    getLengthVar (EVar _ x) = Just x
+    getLengthVar _          = Nothing
 checkCmd' bctxt (CLaplace _ x width e) = \(ctx, mvs) ->
   let s = checkExpr bctxt ctx e
       mvs' = S.insert x mvs
@@ -213,18 +258,21 @@ checkCmd' bctxt (CLaplace _ x width e) = \(ctx, mvs) ->
                     ++ "this should have been caught by basic typechecker"
 checkCmd' bctxt (CIf _ e ct cf) = \(ctx, mvs) ->
   let s = checkExpr bctxt ctx e
-      (ctxt, mvst, ept) = checkCmd' bctxt ct (ctx, mvs)
-      (ctxf, mvsf, epf) = checkCmd' bctxt cf (ctx, mvs)
+      (ctxt, mvst, ept) = checkCmd' bctxt ct (ctx, S.empty)
+      (ctxf, mvsf, epf) = checkCmd' bctxt cf (ctx, S.empty)
       ctx' = M.unionWith max ctxt ctxf
       mvs' = S.union mvst mvsf
   in if s > 0
-     then (S.foldr (\x -> M.insert x (S infinity)) ctx' mvs', mvs', max ept epf)
-     else (ctx', mvs', max ept epf)
+     then (S.foldr (\x -> M.insert x (S infinity)) ctx' mvs', S.union mvs' mvs, max ept epf)
+     else (ctx', S.union mvs' mvs, max ept epf)
 checkCmd' bctxt (CWhile posn e c) =
-  \(ctx, mvs) -> go (0 :: Int) ctx mvs 0
+  \(ctx, mvs) ->
+    let (ctx', mvs', ep) = go (0 :: Int) ctx S.empty 0
+    in (ctx', S.union mvs mvs', ep)
   where unroll = CIf posn e c (CSkip posn)
         go i ctx mvs ep
-          | i > 1000  = (S.foldr (\x -> M.insert x (S infinity)) ctx mvs, mvs, infinity)
+          | i > 1000  =
+            (S.foldr (\x -> M.insert x (S infinity)) ctx mvs, mvs, infinity)
           | otherwise =
             let (ctx', mvs', ep') = checkCmd' bctxt unroll (ctx, mvs)
             in if ctx' == ctx && mvs' == mvs && ep' == 0
@@ -256,10 +304,10 @@ checkCmd' bctxt cmd@(CBMap _ invar outvar tvar ivar outtemp c) = \(ctx, mvs) ->
 checkCmd' bctxt cmd@(CAMap _ invar outvar tvar ivar outtemp c) = \(ctx, mvs) ->
   let desugaredCmd = desugar cmd
 
-      (ctx', mvs', _) = checkCmd' bctxt desugaredCmd (ctx, mvs)
+      (ctx', mvs', _)  = checkCmd' bctxt desugaredCmd (ctx, mvs)
       (cctx, cmvs, ep) = checkCmd' bctxt c (M.insert tvar (ctx ! invar) .
-                                           M.insert ivar 0             $
-                                           ctx, S.empty)
+                                            M.insert ivar 0             $
+                                            ctx, S.empty)
       scmvs = S.filter (\x -> cctx ! x > 0) cmvs
       cInputs = readVars c
 
@@ -274,8 +322,10 @@ checkCmd' bctxt cmd@(CBSum posn invar outvar _ _ bound) = \(ctx, mvs) ->
   let sout = checkClipS posn (ctx ! invar) bound
       (ctx', mvs', _) = checkCmd' bctxt (desugar cmd) (ctx, mvs)
   in (M.insert outvar sout ctx', mvs', 0)
--- TODO: fix this
-checkCmd' bctxt cmd@(CPartition _ _ _ _ _ _ _) = undefined
+checkCmd'
+  bctxt
+  cmd@(CPartition posn invar outvar tvar ivar outindex partCmd) = \(ctx, mvs) ->
+  undefined
 
 checkCmd :: Cmd -> Either [TB.Error] (Context, Epsilon)
 checkCmd c =

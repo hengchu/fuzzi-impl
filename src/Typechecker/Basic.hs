@@ -94,8 +94,7 @@ tcExpr ctx = foldExprM tcVar tcLength tcLit tcBinop tcIndex tcRupdate tcRaccess 
             MULT  -> tcErrorIf (not $ isNumericLT tl) posn arithOpTcError tl
             DIV   -> tcErrorIf (not $ isNumericLT tl) posn arithOpTcError tl
 
-        tcIndex posn = \varr tidx -> do
-          tarr <- tcVar posn varr
+        tcIndex posn = \tarr tidx -> do
           case (tarr, tidx) of
             (LTArray t, LTSmall STInt) -> return . LTSmall $ t
             (LTBag t, LTSmall STInt) -> return t
@@ -131,11 +130,16 @@ tcExpr ctx = foldExprM tcVar tcLength tcLit tcBinop tcIndex tcRupdate tcRaccess 
           return tv
 
 tcCmdTopLevelDecls :: Cmd -> TcM Context
-tcCmdTopLevelDecls = foldCmdM tcCassign tcCAupdate tcClaplace tcCif tcCwhile tcCdecl tcCseq tcCskip tcBmap tcAmap tcBsum tcPartition
+tcCmdTopLevelDecls = foldCmdM tcCassign tcCAupdate tcCLupdate
+                              tcClaplace tcCif
+                              tcCwhile tcCdecl tcCseq tcCskip tcBmap
+                              tcAmap tcBsum tcPartition
   where
     tcCassign _ _ _ = pure empty
 
     tcCAupdate _ _ _ _ = pure empty
+
+    tcCLupdate _ _ _ = pure empty
 
     tcClaplace _ _ _ _ = pure empty
 
@@ -143,12 +147,7 @@ tcCmdTopLevelDecls = foldCmdM tcCassign tcCAupdate tcClaplace tcCif tcCwhile tcC
 
     tcCwhile _ _ _ = pure empty
 
-    tcCdecl _ x _ t =
-      case t of
-        LTSmall _ -> pure $ M.singleton x t
-        LTRow   _ -> pure $ M.singleton x t
-        LTArray _ -> pure $ M.fromList [(x, t), (lenVarName x, LTSmall STInt)]
-        LTBag   _ -> pure $ M.fromList [(x, t), (lenVarName x, LTSmall STInt)]
+    tcCdecl _ x _ t = pure $ M.singleton x t
 
     tcCseq posn m1 m2 = do
       let multiDeclVars = M.intersection m1 m2
@@ -171,6 +170,7 @@ tcCmd' ctx c =
   foldCmdA
     tcCassign
     tcCAupdate
+    tcCLupdate
     tcClaplace
     tcCif
     tcCwhile
@@ -194,20 +194,37 @@ tcCmd' ctx c =
       when (t /= te) $
         tcError posn $ assignTcError x e
 
-    tcCAupdate posn x eidx erhs = do
+    tcCAupdate posn earr eidx erhs = do
       tidx <- tcExpr ctx eidx
       when (tidx /= LTSmall STInt) $
         tcError posn $ indexNotIntTcError eidx
       trhs <- tcExpr ctx erhs
-      tx <- lookupVar posn x
+      tx <- tcExpr ctx earr
       case tx of
         LTArray st -> do
           when (LTSmall st /= trhs) $
-            tcError posn $ arrayUpdateTcError x eidx erhs
+            tcError posn $ arrayUpdateTcError earr eidx erhs
         LTBag t -> do
           when (t /= trhs) $
-            tcError posn $ arrayUpdateTcError x eidx erhs
+            tcError posn $ arrayUpdateTcError earr eidx erhs
         _ -> tcError posn "Indexing a non-array/non-bag type"
+
+    isBagOrArray t =
+      case t of
+        LTArray _ -> True
+        LTBag _ -> True
+        _ -> False
+
+    ensureProperLengthExpr posn e = do
+      te' <- tcExpr ctx e
+      when (not $ isBagOrArray te') $
+        tcError posn lengthTcError
+
+    tcCLupdate posn lhs rhs = do
+      ensureProperLengthExpr posn lhs
+      trhs <- tcExpr ctx rhs
+      when (trhs /= LTSmall STInt) $
+        tcError posn $ "Expected int, got " ++ show trhs
 
     tcClaplace posn x _ rhs = tcCassign posn x rhs
 
@@ -276,12 +293,16 @@ indexNotIntTcError :: Expr -> Error
 indexNotIntTcError eidx =
   "The index expression: " ++ show eidx ++ " is not an int"
 
-arrayUpdateTcError :: String -> Expr -> Expr -> Error
-arrayUpdateTcError var idx rhs =
-  "Array update type mismatch in: " ++ var ++ "[" ++ show idx ++ "]" ++ " = " ++ show rhs
+arrayUpdateTcError :: Expr -> Expr -> Expr -> Error
+arrayUpdateTcError arr idx rhs =
+  "Array update type mismatch in: " ++ show arr ++ "[" ++ show idx ++ "]" ++ " = " ++ show rhs
 
 condNotBoolTcError :: Expr -> Error
 condNotBoolTcError econd = "Condition expression: " ++ show econd ++ " is not a boolean"
 
 lengthTcError :: Error
 lengthTcError = "length() can only be applied to array or bag expressions"
+
+lengthUpdateLhsTcError :: Error
+lengthUpdateLhsTcError =
+  "Impossible: length() update lhs expression is not a length expression!"

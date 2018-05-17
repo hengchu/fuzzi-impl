@@ -73,7 +73,8 @@ import Prelude hiding (LT, GT, EQ)
 Cmd
   : skip                                      { CSkip    (token2Position $1) }
   | ident '=' Expr                            { CAssign  (token2Position $2) (getIdent $1) $3 }
-  | ident '[' Expr ']' '=' Expr               { CAUpdate (token2Position $5) (getIdent $1) $3 $6 }
+  | Expr '[' Expr ']' '=' Expr                { CAUpdate (token2Position $5) $1 $3 $6 }
+  | length '(' Expr ')' '=' Expr              { CLUpdate (token2Position $5) $3 $6 }
   | ident '$=' laplace '(' float ',' Expr ')' { CLaplace (token2Position $2) (getIdent $1) (getFloat $5) $7 }
   | ident ':' LargeType                       { CDecl    (token2Position $2) (getIdent $1) 0 $3 }
   | ident ':' '[' float ']' LargeType         { CDecl    (token2Position $2) (getIdent $1) (getFloat $4) $6 }
@@ -148,7 +149,7 @@ Expr
   | Expr '!=' Expr                           { EBinop (token2Position $2) $1 NEQ   $3 }
   | Expr '&&' Expr                           { EBinop (token2Position $2) $1 AND   $3 }
   | Expr '||' Expr                           { EBinop (token2Position $2) $1 OR    $3 }
-  | ident '[' Expr ']'                       { EIndex (token2Position $2) (getIdent $1) $3       }
+  | Expr '[' Expr ']'                        { EIndex (token2Position $2) $1 $3       }
   | Expr '{' ident '=' Expr '}'              { ERUpdate (token2Position $2) $1 (getIdent $3) $5  }
   | Expr '.' ident                           { ERAccess (token2Position $2) $1 (getIdent $3)     }
   | '(' Expr ')' %prec ATOM                  { $2 }

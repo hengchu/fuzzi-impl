@@ -28,8 +28,8 @@ checkExpr ctx e =
     checkBinop _ infL _ infR =
       approx infL infR
 
-    checkIndex _ v infIdx =
-      approx (ctx ! v) infIdx
+    checkIndex _ infArr infIdx =
+      approx infArr infIdx
 
     checkRupdate _ infR _ infV =
       approx infR infV
@@ -44,6 +44,7 @@ checkToplevelDecl c =
   foldCmd
     checkAssign
     checkAupdate
+    checkLupdate
     checkLaplace
     checkIf
     checkWhile
@@ -57,15 +58,11 @@ checkToplevelDecl c =
     c
   where checkAssign _ _ _ = empty
         checkAupdate _ _ _ _ = empty
+        checkLupdate _ _ _ = empty
         checkLaplace _ _ _ _ = empty
         checkIf _ _ _ _ = empty
         checkWhile _ _ _ = empty
-        checkDecl _ x s t =
-          case t of
-            LTSmall _ -> M.singleton x (s > 0)
-            LTRow   _ -> M.singleton x (s > 0)
-            LTArray _ -> M.fromList [(x, s > 0), (lenVarName x, False)]
-            LTBag   _ -> M.fromList [(x, s > 0), (lenVarName x, s > 0)]
+        checkDecl _ x s _ = M.singleton x (s > 0)
         checkSeq _ ctx1 ctx2 = M.union ctx1 ctx2
         checkSkip _ = empty
         checkBmap _ _ _ _ _ _ _ = empty
@@ -76,20 +73,25 @@ checkToplevelDecl c =
 checkCmd' :: Cmd -> (Context, S.Set String) -> (Context, S.Set String)
 checkCmd' (CAssign _ x e) =
   \(ctx, mvs) -> (M.insert x (checkExpr ctx e) ctx, S.insert x mvs)
-checkCmd' (CAUpdate _ x eidx erhs) =
-  \(ctx, mvs) -> (M.insert x (approx (checkExpr ctx eidx) (checkExpr ctx erhs)) ctx,
-                  S.insert x mvs)
+checkCmd' (CAUpdate _ earr eidx erhs) =
+  \(ctx, mvs) ->
+    let x = indexedVar earr in
+    (M.insert x (approx (checkExpr ctx eidx) (checkExpr ctx erhs)) ctx,
+     S.insert x mvs)
+-- TODO: fix this
+checkCmd' (CLUpdate _ _ _) =
+  undefined
 checkCmd' (CLaplace _ x _ _) =
   \(ctx, mvs) -> (M.insert x False ctx, S.insert x mvs)
 checkCmd' (CIf _ e ct cf) =
   \(ctx, mvs) ->
-    let (ctxt, mvst) = checkCmd' ct (ctx, mvs)
-        (ctxf, mvsf) = checkCmd' cf (ctx, mvs)
+    let (ctxt, mvst) = checkCmd' ct (ctx, S.empty)
+        (ctxf, mvsf) = checkCmd' cf (ctx, S.empty)
         ctx'         = M.unionWith approx ctxt ctxf
         mvs'         = S.union mvst mvsf
     in if checkExpr ctx e
-       then (S.foldr (\x -> M.insert x True) ctx' mvs', mvs')
-       else (ctx', mvs')
+       then (S.foldr (\x -> M.insert x True) ctx' mvs', S.union mvs mvs')
+       else (ctx', S.union mvs mvs')
 checkCmd' while@(CWhile posn e c) =
   \(ctx, mvs) ->
     let (ctx', mvs') = checkCmd' unroll (ctx, mvs)

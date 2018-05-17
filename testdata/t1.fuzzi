@@ -15,4 +15,4 @@ amap(xs1, ys1, tx, i, ty, {
   ty = tx * 2;
 });
 
-bsum(xs, tx, ty, i, 2);
+zs :[1.0] { { int } };
