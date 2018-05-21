@@ -87,6 +87,21 @@ data Cmd = CAssign  Position String Expr
                       Cmd      -- ^partition operation
   deriving (Show, Eq)
 
+cmdPosn :: Cmd -> Position
+cmdPosn (CAssign    p _ _) = p
+cmdPosn (CAUpdate   p _ _ _) = p
+cmdPosn (CLUpdate   p _ _) = p
+cmdPosn (CLaplace   p _ _ _) = p
+cmdPosn (CIf        p _ _ _) = p
+cmdPosn (CWhile     p _ _) = p
+cmdPosn (CDecl      p _ _ _) = p
+cmdPosn (CSeq       p _ _) = p
+cmdPosn (CSkip      p) = p
+cmdPosn (CBMap      p _ _ _ _ _ _) = p
+cmdPosn (CAMap      p _ _ _ _ _ _) = p
+cmdPosn (CBSum      p _ _ _ _ _) = p
+cmdPosn (CPartition p _ _ _ _ _ _) = p
+
 -- | Traverses to the left most EIndex where the term being indexed is a
 -- variable. This is a partial function.
 indexedVar :: Expr -> String

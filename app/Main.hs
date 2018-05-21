@@ -1,16 +1,17 @@
 module Main where
 
+import Control.Monad
+import Data.Map as M
 import GHC.IO.Handle
 import GHC.IO.Handle.FD
-import System.Exit
-import Options
 import Lexer
+import Options
 import Parser
 import Pretty
+import Syntax
+import System.Exit
 import Text.PrettyPrint
-import Control.Monad
 import Typechecker.Sensitivity
-import Data.Map as M
 
 data CLIOptions = CLIOptions {
   optFile :: String
@@ -36,7 +37,7 @@ main = runCommand $ \opts _ -> do
   let ast = parseProg . alexScanTokens $ progText
 
   when (optPretty opts) $ do
-    putStr $ render $ prettyCmd ast
+    putStr . render . prettyCmd . desugar $ ast
     exitWith ExitSuccess
 
   when (optTypecheck opts) $ do
