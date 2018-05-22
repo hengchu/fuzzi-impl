@@ -17,7 +17,7 @@ approx inf1 inf2 = inf1 || inf2
 
 checkExpr :: Context -> Expr -> Bool
 checkExpr ctx e =
-  foldExpr checkVar checkLength checkLit checkBinop checkIndex checkRupdate checkRaccess checkClip e
+  foldExpr checkVar checkLength checkLit checkBinop checkIndex checkRupdate checkRaccess checkArray checkBag checkClip e
   where
     checkVar _ x = ctx ! x
 
@@ -37,14 +37,17 @@ checkExpr ctx e =
     checkRaccess _ infR _ =
       infR
 
+    -- TODO: fix this
+    checkArray _ _ = error "Not implemented"
+
+    checkBag _ _ = error "Not implemented"
+
     checkClip _ infE _ = infE
 
 checkToplevelDecl :: Cmd -> Context
 checkToplevelDecl c =
   foldCmd
     checkAssign
-    checkAupdate
-    checkLupdate
     checkLaplace
     checkIf
     checkWhile
@@ -57,8 +60,6 @@ checkToplevelDecl c =
     checkPartition
     c
   where checkAssign _ _ _ = empty
-        checkAupdate _ _ _ _ = empty
-        checkLupdate _ _ _ = empty
         checkLaplace _ _ _ _ = empty
         checkIf _ _ _ _ = empty
         checkWhile _ _ _ = empty
@@ -72,15 +73,8 @@ checkToplevelDecl c =
 
 checkCmd' :: Cmd -> (Context, S.Set String) -> (Context, S.Set String)
 checkCmd' (CAssign _ x e) =
-  \(ctx, mvs) -> (M.insert x (checkExpr ctx e) ctx, S.insert x mvs)
-checkCmd' (CAUpdate _ earr eidx erhs) =
-  \(ctx, mvs) ->
-    let x = indexedVar earr in
-    (M.insert x (approx (checkExpr ctx eidx) (checkExpr ctx erhs)) ctx,
-     S.insert x mvs)
--- TODO: fix this
-checkCmd' (CLUpdate _ _ _) =
-  undefined
+  let mv = modifiedVar x in
+  \(ctx, mvs) -> (M.insert mv (checkExpr ctx e) ctx, S.insert mv mvs)
 checkCmd' (CLaplace _ x _ _) =
   \(ctx, mvs) -> (M.insert x False ctx, S.insert x mvs)
 checkCmd' (CIf _ e ct cf) =

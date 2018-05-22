@@ -3,8 +3,8 @@
 
 module Pretty where
 
-import Data.Map
-import Data.Map as M
+import Data.Map hiding (foldr)
+import qualified Data.Map as M
 
 import Syntax
 import Prelude hiding (LT, EQ, GT)
@@ -38,7 +38,8 @@ opDoc = M.fromList [(OR, text "||"), (AND, text "&&"),
 prettyExpr :: Expr -> Int -> Doc
 prettyExpr e =
   foldExpr prettyVar prettyLen prettyLit prettyBinop
-           prettyIndex prettyUpdate prettyAccess prettyClip
+           prettyIndex prettyUpdate prettyAccess
+           prettyArray prettyBag prettyClip
            e
 
   where prettyVar _ x = \_ -> text x
@@ -78,23 +79,24 @@ prettyExpr e =
         prettyAccess _ prow label = \prec ->
           prow prec <> text "." <> text label
 
+        prettyArrContents pexprs =
+          foldr (\pe acc -> pe 0 <> comma <+> acc) mempty pexprs
+
+        prettyArray _ pexprs = \_ -> lbrack <> prettyArrContents pexprs <> rbrack
+
+        prettyBag _ exprs = \_ -> lbrace <> prettyArrContents exprs <> rbrace
+
         prettyClip posn pv lit = \_ ->
           text "clip" <> lparen <> pv 0 <> comma <+> prettyLit posn lit (0 :: Int) <> rparen
 
 prettyCmd :: Cmd -> Doc
 prettyCmd =
-  foldCmd prettyAssign prettyAupdate prettyLupdate
+  foldCmd prettyAssign
           prettyLaplace prettyIf prettyWhile prettyDecl
           prettySeq prettySkip prettyBmap prettyAmap
           prettyBsum prettyPartition
   where
-    prettyAssign _ x e = text x <+> equals <+> prettyExpr e 0
-
-    prettyAupdate _ earr eidx erhs =
-      prettyExpr earr 0 <> lbrack <> prettyExpr eidx 0 <> rbrack <+> equals <+> prettyExpr erhs 0
-
-    prettyLupdate _ earr erhs =
-      text "length" <> lparen <> prettyExpr earr 0 <> rparen <+> equals <+> prettyExpr erhs 0
+    prettyAssign _ x e = prettyExpr x 0 <+> equals <+> prettyExpr e 0
 
     prettyLaplace _ x width e =
       text x <+> text "$=" <+> text "laplace" <> lparen <> float width <> comma <+> prettyExpr e 0 <> rparen
@@ -121,6 +123,7 @@ prettyCmd =
       STInt -> text "int"
       STFloat -> text "float"
       STBool -> text "bool"
+      STAny -> text "any"
 
     prettyRT rt =
       M.foldrWithKey (\label st doc -> text label <+> colon <+> prettyST st <> comma <+> doc) mempty rt
@@ -130,6 +133,7 @@ prettyCmd =
       LTRow (getRowTypes -> rt) -> lbrace <+> prettyRT rt <+> rbrace
       LTArray st -> lbrack <> prettyST st <> rbrack
       LTBag lt -> lbrace <> prettyLT lt <> rbrace
+      LTAny -> text "any"
 
     prettyDecl _ x s t =
       text x <+> colon <> lbrack <> float s <> rbrack <+> prettyLT t

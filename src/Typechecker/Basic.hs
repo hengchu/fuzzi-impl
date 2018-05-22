@@ -5,6 +5,7 @@ module Typechecker.Basic where
 
 import Syntax
 import Control.Monad
+import Data.Foldable
 import Data.List
 import Data.Map
 import Data.Map as M
@@ -34,7 +35,7 @@ tcErrorIf cond posn err val =
   if cond then tcError posn err else pure val
 
 tcExpr :: Context -> Expr -> TcM LargeType
-tcExpr ctx = foldExprM tcVar tcLength tcLit tcBinop tcIndex tcRupdate tcRaccess tcClip
+tcExpr ctx = foldExprM tcVar tcLength tcLit tcBinop tcIndex tcRupdate tcRaccess tcArray tcBag tcClip
   where tcVar posn = \var ->
           case M.lookup var ctx of
             Nothing -> tcError posn $ "Unknown variable: " ++ var
@@ -121,6 +122,31 @@ tcExpr ctx = foldExprM tcVar tcLength tcLit tcBinop tcIndex tcRupdate tcRaccess 
             Nothing -> tcError posn $ label ++ " doesn't exist"
             Just t  -> return . LTSmall $ t
 
+        tcArray posn = \lts -> do
+          contentLt <- foldrM
+                         (\lt acc ->
+                             case lt of
+                               LTSmall st
+                                 -> if st == acc || acc == STAny
+                                    then return st
+                                    else tcError posn $ "Array expression contains many different types"
+                               _ -> tcError posn $ "Array expression should only contain small expressions"
+                         )
+                         STAny
+                         lts
+          return $ LTArray contentLt
+
+        tcBag posn = \lts -> do
+          contentLt <- foldrM
+                         (\lt acc ->
+                            if lt == acc || acc == LTAny
+                            then return lt
+                            else tcError posn $ "Bag expression contains many different types"
+                         )
+                         LTAny
+                         lts
+          return $ LTBag contentLt
+
         tcClip posn = \tv lit -> do
           tlit <- tcExpr ctx (ELit posn lit)
           when (tv /= tlit) $
@@ -130,16 +156,12 @@ tcExpr ctx = foldExprM tcVar tcLength tcLit tcBinop tcIndex tcRupdate tcRaccess 
           return tv
 
 tcCmdTopLevelDecls :: Cmd -> TcM Context
-tcCmdTopLevelDecls = foldCmdM tcCassign tcCAupdate tcCLupdate
+tcCmdTopLevelDecls = foldCmdM tcCassign
                               tcClaplace tcCif
                               tcCwhile tcCdecl tcCseq tcCskip tcBmap
                               tcAmap tcBsum tcPartition
   where
     tcCassign _ _ _ = pure empty
-
-    tcCAupdate _ _ _ _ = pure empty
-
-    tcCLupdate _ _ _ = pure empty
 
     tcClaplace _ _ _ _ = pure empty
 
@@ -169,8 +191,6 @@ tcCmd' :: Context -> Cmd -> TcM ()
 tcCmd' ctx c =
   foldCmdA
     tcCassign
-    tcCAupdate
-    tcCLupdate
     tcClaplace
     tcCif
     tcCwhile
@@ -183,50 +203,21 @@ tcCmd' ctx c =
     tcPartition
     c
   where
-    lookupVar posn x =
-      case M.lookup x ctx of
-        Just t -> return t
-        Nothing -> tcError posn $ undeclaredVariableTcError x
+    isValidLhsExpr = \case
+      EVar _ _ -> True
+      EIndex _ e _ -> isValidLhsExpr e
+      ELength _ e -> isValidLhsExpr e
+      _ -> False
 
     tcCassign posn x e = do
-      t <- lookupVar posn x
+      when (not $ isValidLhsExpr x) $
+        tcError posn $ invalidLhsExprError x
+      t <- tcExpr ctx x
       te <- tcExpr ctx e
       when (t /= te) $
         tcError posn $ assignTcError x e
 
-    tcCAupdate posn earr eidx erhs = do
-      tidx <- tcExpr ctx eidx
-      when (tidx /= LTSmall STInt) $
-        tcError posn $ indexNotIntTcError eidx
-      trhs <- tcExpr ctx erhs
-      tx <- tcExpr ctx earr
-      case tx of
-        LTArray st -> do
-          when (LTSmall st /= trhs) $
-            tcError posn $ arrayUpdateTcError earr eidx erhs
-        LTBag t -> do
-          when (t /= trhs) $
-            tcError posn $ arrayUpdateTcError earr eidx erhs
-        _ -> tcError posn "Indexing a non-array/non-bag type"
-
-    isBagOrArray t =
-      case t of
-        LTArray _ -> True
-        LTBag _ -> True
-        _ -> False
-
-    ensureProperLengthExpr posn e = do
-      te' <- tcExpr ctx e
-      when (not $ isBagOrArray te') $
-        tcError posn lengthTcError
-
-    tcCLupdate posn lhs rhs = do
-      ensureProperLengthExpr posn lhs
-      trhs <- tcExpr ctx rhs
-      when (trhs /= LTSmall STInt) $
-        tcError posn $ "Expected int, got " ++ show trhs
-
-    tcClaplace posn x _ rhs = tcCassign posn x rhs
+    tcClaplace posn x _ rhs = tcCassign posn (EVar posn x) rhs
 
     tcCond e = do
       te <- tcExpr ctx e
@@ -281,9 +272,9 @@ multiDeclTcError multiDecls =
   let vars = M.keys multiDecls
   in "Multiple type declarations for these variables: " ++ (intercalate ", " vars)
 
-assignTcError :: String -> Expr -> Error
-assignTcError var rhs =
-  "Assignment type mismatch in: " ++ var ++ " = " ++ show rhs
+assignTcError :: Expr -> Expr -> Error
+assignTcError lhs rhs =
+  "Assignment type mismatch in: " ++ show lhs ++ " = " ++ show rhs
 
 undeclaredVariableTcError :: String -> Error
 undeclaredVariableTcError var =
@@ -306,3 +297,7 @@ lengthTcError = "length() can only be applied to array or bag expressions"
 lengthUpdateLhsTcError :: Error
 lengthUpdateLhsTcError =
   "Impossible: length() update lhs expression is not a length expression!"
+
+invalidLhsExprError :: Expr -> Error
+invalidLhsExprError lhs =
+  "The LHS of assignment is invalid: " ++ show lhs

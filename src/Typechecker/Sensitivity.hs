@@ -10,8 +10,8 @@ import Syntax
 
 import GHC.Generics
 import Data.Data
-import Data.Map
-import Data.Map as M
+import Data.Map hiding (foldr)
+import qualified Data.Map as M
 import qualified Data.Set as S
 import qualified Typechecker.Basic   as TB
 import Data.Number.Transfinite
@@ -69,7 +69,9 @@ type Context = Map String Sensitivity
 
 checkExpr :: TB.Context -> Context -> Expr -> Sensitivity
 checkExpr bctxt ctx e =
-  fst $ foldExpr checkVar checkLength checkLit checkBinop checkIndex checkRupdate checkRaccess checkClip e
+  fst $ foldExpr checkVar checkLength checkLit checkBinop
+                 checkIndex checkRupdate checkRaccess
+                 checkArray checkBag checkClip e
   where
     checkVar _ x = (ctx ! x, bctxt ! x)
 
@@ -121,6 +123,22 @@ checkExpr bctxt ctx e =
           (srec, LTSmall $ getRowTypes trec' ! label)
         _ -> error "Impossible: record access on a non record type"
 
+    checkArray _ sexprs =
+      case typ of
+        LTSmall t -> (sens, LTArray t)
+        LTAny -> (sens, LTArray STAny)
+        _ -> error "Impossible: the basic typechecker should not allow arrays with large types"
+      where (sens, typ) = foldr (\(s, t) (acc, _) -> (s + acc, t)) (0, LTAny) sexprs
+
+    checkBag _ sexprs =
+      case typ of
+        LTAny -> (2 * sens, LTBag LTAny)
+        t     -> (2 * sens, LTBag t)
+      where (sens, typ) =
+              foldr (\(s, t) (acc, _) -> (if s > 0 then (1 + acc, t) else (acc, t)))
+                    (0, LTAny)
+                    sexprs
+
     checkClip posn (s, _) bound =
       let s' = checkClipS posn s bound
           Right t = TB.runTcM $ TB.tcExpr bctxt (ELit undefined bound)
@@ -146,7 +164,9 @@ checkClipS _ _ bound =
 
 freeVars :: Expr -> S.Set String
 freeVars =
-  foldExpr checkVar checkLength checkLit checkBinop checkIndex checkRupdate checkRaccess checkClip
+  foldExpr checkVar checkLength checkLit checkBinop
+           checkIndex checkRupdate checkRaccess
+           checkArray checkBag checkClip
   where
     checkVar _ x = S.singleton x
     checkLength _ fvs = fvs
@@ -154,6 +174,8 @@ freeVars =
     checkBinop _ sl _ sr = S.union sl sr
     checkIndex _ sarr sidx = S.union sarr sidx
     checkRupdate _ sr _ sv = S.union sr sv
+    checkArray _ sarr = foldr S.union S.empty sarr
+    checkBag _ sarr = foldr S.union S.empty sarr
     checkRaccess _ sr _ = sr
     checkClip _ s _ = s
 
@@ -161,8 +183,6 @@ checkToplevelDecl :: Cmd -> Context
 checkToplevelDecl =
   foldCmd
     checkAssign
-    checkAupdate
-    checkLupdate
     checkLaplace
     checkIf
     checkWhile
@@ -174,8 +194,6 @@ checkToplevelDecl =
     checkBsum
     checkPartition
   where checkAssign _ _ _ = empty
-        checkAupdate _ _ _ _ = empty
-        checkLupdate _ _ _ = empty
         checkLaplace _ _ _ _ = empty
         checkIf _ _ _ _ = empty
         checkWhile _ _ _ = empty
@@ -188,9 +206,8 @@ checkToplevelDecl =
         checkPartition _ _ _ _ _ _ _ _ = empty
 
 readVars :: Cmd -> S.Set String
-readVars (CAssign _ _ rhs) = freeVars rhs
-readVars (CAUpdate _ _ idx rhs) = S.union (freeVars idx) (freeVars rhs)
-readVars (CLaplace _ _ _ e) = freeVars e
+readVars (CAssign _ lhs rhs) =
+  freeVars rhs `S.union` (modifiedVar lhs `S.delete` freeVars lhs)
 readVars (CIf _ e ct cf) = freeVars e `S.union` readVars ct `S.union` readVars cf
 readVars (CWhile _ e c) = S.union (freeVars e) (readVars c)
 readVars (CDecl _ _ _ _) = S.empty
@@ -199,9 +216,9 @@ readVars (CSkip _) = S.empty
 readVars c = readVars . desugar $ c
 
 checkCmd' :: TB.Context -> Cmd -> (Context, S.Set String) -> (Context, S.Set String, Float)
-checkCmd' bctxt (CAssign _ x e) = \(ctx, mvs) ->
+checkCmd' bctxt (CAssign _ (EVar _ x) e) = \(ctx, mvs) ->
   (M.insert x (checkExpr bctxt ctx e) ctx, S.insert x mvs, 0)
-checkCmd' bctxt (CAUpdate _ earr eidx erhs) = \(ctx, mvs) ->
+checkCmd' bctxt (CAssign _ (EIndex _ earr eidx) erhs) = \(ctx, mvs) ->
   let x = indexedVar earr
       tx = bctxt ! x
       mvs' = S.insert x mvs
@@ -221,7 +238,7 @@ checkCmd' bctxt (CAUpdate _ earr eidx erhs) = \(ctx, mvs) ->
            else (M.insert       x 0 ctx, mvs', 0)
        _ -> error $ "Impossible: array update on non-array/non-bag type, "
                     ++ "this should have been caught by basic typechecker"
-checkCmd' bctxt (CLUpdate _ lhs rhs) = \(ctx, mvs) ->
+checkCmd' bctxt (CAssign _ (ELength _ lhs) rhs) = \(ctx, mvs) ->
   let srhs = checkExpr bctxt ctx rhs
       maybeX = getLengthVar lhs
       mv = indexedVar lhs
@@ -248,6 +265,9 @@ checkCmd' bctxt (CLUpdate _ lhs rhs) = \(ctx, mvs) ->
     -- being updated.
     getLengthVar (EVar _ x) = Just x
     getLengthVar _          = Nothing
+checkCmd' _ (CAssign _ _ _) =
+  error $ "Impossible: assignment lhs is invalid, this"
+          ++ " should have been caught by the basic typechecker"
 checkCmd' bctxt (CLaplace _ x width e) = \(ctx, mvs) ->
   let s = checkExpr bctxt ctx e
       mvs' = S.insert x mvs
@@ -295,7 +315,7 @@ checkCmd' bctxt cmd@(CBMap _ invar outvar tvar ivar outtemp c) = \(ctx, mvs) ->
                                             M.insert ivar (S infinity) $
                                             ctx, S.empty)
       scmvs = S.filter (\x -> cctx ! x > 0) cmvs
-      cInputs = readVars c
+      cInputs = S.filter (\x -> ctx ! x > 0) $ readVars c
 
       deterministic = ep == 0
       onlySensVarModified = scmvs `S.isSubsetOf` (S.fromList [outtemp])
@@ -312,11 +332,11 @@ checkCmd' bctxt cmd@(CAMap _ invar outvar tvar ivar outtemp c) = \(ctx, mvs) ->
                                             M.insert ivar 0             $
                                             ctx, S.empty)
       scmvs = S.filter (\x -> cctx ! x > 0) cmvs
-      cInputs = readVars c
+      cInputs = S.filter (\x -> ctx ! x > 0) $ readVars c
 
       deterministic = ep == 0
       onlySensVarModified = scmvs `S.isSubsetOf` (S.fromList [outtemp])
-      onlyUsesTandI = cInputs `S.isSubsetOf` (S.fromList [tvar, ivar])
+      onlyUsesTandI =cInputs `S.isSubsetOf` (S.fromList [tvar, ivar])
 
   in if deterministic && onlySensVarModified && onlyUsesTandI
      then (M.insert outvar (cctx ! outtemp) ctx', mvs', 0)
@@ -334,7 +354,7 @@ checkCmd'
                                                   M.insert ivar (S infinity) $
                                                   ctx, S.empty)
       scmvs = S.filter (\x -> cctx ! x > 0) cmvs
-      cInputs = readVars partCmd
+      cInputs = S.filter (\x -> ctx ! x > 0) $ readVars partCmd
 
       deterministic = ep == 0
       onlySensVarModified = scmvs `S.isSubsetOf` (S.fromList [outindex])

@@ -132,6 +132,12 @@ interpExpr (ERAccess posn e label) m =
         Nothing -> throw . MkException posn $ FuzziTypeError
         Just v -> v
     _ -> throw . MkException posn $ FuzziTypeError
+interpExpr (EArray _ exprs) m =
+  let vs = fmap (\e -> interpExpr e m) exprs
+  in VArr (length vs) vs
+interpExpr (EBag _ exprs) m =
+  let vs = fmap (\e -> interpExpr e m) exprs
+  in VArr (length vs) vs
 interpExpr (EClip posn e lit) m =
   clip (interpExpr e m) (interpLiteral lit)
   where
@@ -189,11 +195,7 @@ interpLhsExpr (ELength posn e) =
 interpLhsExpr e = throw . MkException (exprPosn e) $ FuzziTypeError
 
 interp :: Cmd -> Memory -> Memory
-interp (CAssign _ x e) = \m -> M.insert x (interpExpr e m) m
-interp (CAUpdate posn earr eidx erhs) =
-  \m -> interpLhsExpr (EIndex posn earr eidx) (interpExpr erhs m) m
-interp (CLUpdate posn earr erhs) =
-  \m -> interpLhsExpr (ELength posn earr) (interpExpr erhs m) m
+interp (CAssign _ x e) = \m -> interpLhsExpr x (interpExpr e m) m
 interp (CLaplace _ x _ e) = \m -> M.insert x (interpExpr e m) m
 interp (CIf posn e ct cf) = \m ->
   case interpExpr e m of

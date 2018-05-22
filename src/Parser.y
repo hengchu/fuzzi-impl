@@ -72,9 +72,7 @@ import Prelude hiding (LT, GT, EQ)
 
 Cmd
   : skip                                      { CSkip    (token2Position $1) }
-  | ident '=' Expr                            { CAssign  (token2Position $2) (getIdent $1) $3 }
-  | Expr '[' Expr ']' '=' Expr                { CAUpdate (token2Position $5) $1 $3 $6 }
-  | length '(' Expr ')' '=' Expr              { CLUpdate (token2Position $5) $3 $6 }
+  | Expr '=' Expr                             { CAssign  (token2Position $2) $1 $3 }
   | ident '$=' laplace '(' float ',' Expr ')' { CLaplace (token2Position $2) (getIdent $1) (getFloat $5) $7 }
   | ident ':' LargeType                       { CDecl    (token2Position $2) (getIdent $1) 0 $3 }
   | ident ':' '[' float ']' LargeType         { CDecl    (token2Position $2) (getIdent $1) (getFloat $4) $6 }
@@ -154,6 +152,8 @@ Expr
   | Expr '{' ident '=' Expr '}'              { ERUpdate (token2Position $2) $1 (getIdent $3) $5  }
   | Expr '.' ident                           { ERAccess (token2Position $2) $1 (getIdent $3)     }
   | '(' Expr ')' %prec ATOM                  { $2 }
+  | '[' ManyExprs ']'                        { EArray (token2Position $1) $2 }
+  | '{' ManyExprs '}'                        { EArray (token2Position $1) $2 }
   | clip '(' Expr ',' Literal ')'            { EClip (token2Position $1) $3 (fst $5) }
 
 SmallLiteral
@@ -172,6 +172,10 @@ LabelLiteralPair
 LabelLiteralPairs
   : LabelLiteralPair                       { [$1]    }
   | LabelLiteralPair ',' LabelLiteralPairs { $1 : $3 }
+
+ManyExprs
+  : Expr               { [$1]    }
+  | Expr ',' ManyExprs { $1 : $3 }
 
 {
 parseError :: [Token] -> a
