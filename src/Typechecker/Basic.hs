@@ -209,12 +209,23 @@ tcCmd' ctx c =
       ELength _ e -> isValidLhsExpr e
       _ -> False
 
+    stCompat STAny _  = True
+    stCompat _  STAny = True
+    stCompat t1 t2    = t1 == t2
+
+    ltCompat LTAny _                   = True
+    ltCompat _ LTAny                   = True
+    ltCompat (LTBag t1)   (LTBag t2)   = ltCompat t1 t2
+    ltCompat (LTArray t1) (LTArray t2) = stCompat t1 t2
+    ltCompat (LTSmall t1) (LTSmall t2) = stCompat t1 t2
+    ltCompat t1 t2 = t1 == t2
+
     tcCassign posn x e = do
       when (not $ isValidLhsExpr x) $
         tcError posn $ invalidLhsExprError x
       t <- tcExpr ctx x
       te <- tcExpr ctx e
-      when (t /= te) $
+      when (not $ ltCompat t te) $
         tcError posn $ assignTcError x e
 
     tcClaplace posn x _ rhs = tcCassign posn (EVar posn x) rhs
