@@ -68,7 +68,7 @@ checkToplevelDecl c =
         checkBmap _ _ _ _ _ _ _ = empty
         checkAmap _ _ _ _ _ _ _ = empty
         checkBsum _ _ _ _ _ _ = empty
-        checkPartition _ _ _ _ _ _ _ = empty
+        checkPartition _ _ _ _ _ _ _ _ = empty
 
 checkCmd' :: Cmd -> (Context, S.Set String) -> (Context, S.Set String)
 checkCmd' (CAssign _ x e) =

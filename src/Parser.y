@@ -102,14 +102,15 @@ Cmd
       }
   | bsum '(' ident ',' ident ',' ident ',' ident ',' Literal ')'
       { CBSum (token2Position $1) (getIdent $3) (getIdent $5) (getIdent $7) (getIdent $9) (fst $11) }
-  | partition '(' ident ',' ident ',' ident ',' ident ',' ident ',' '{' Cmd '}' ')'
+  | partition '(' ident ',' ident ',' ident ',' ident ',' ident ',' int ',' '{' Cmd '}' ')'
       { CPartition (token2Position $1)
                    (getIdent $3)
                    (getIdent $5)
                    (getIdent $7)
                    (getIdent $9)
                    (getIdent $11)
-                   $14
+                   (getInt $13)
+                   $16
       }
 
 SmallType

@@ -4,11 +4,11 @@
 --
 -- hash: 8e626c1961469d78c251dcf89e465fe55dadaf1047dbebf618fc104b488a9186
 
-name:           typeless-dpimp
+name:           fuzzi-impl
 version:        0.1.0.0
-description:    Please see the README on GitHub at <https://github.com/githubuser/typeless-dpimp#readme>
-homepage:       https://github.com/githubuser/typeless-dpimp#readme
-bug-reports:    https://github.com/githubuser/typeless-dpimp/issues
+description:    Please see the README on GitHub at <https://github.com/githubuser/fuzzi-impl#readme>
+homepage:       https://github.com/githubuser/fuzzi-impl#readme
+bug-reports:    https://github.com/githubuser/fuzzi-impl/issues
 author:         Author name here
 maintainer:     example@example.com
 copyright:      2018 Author name here
@@ -26,7 +26,7 @@ data-dir:
 
 source-repository head
   type: git
-  location: https://github.com/githubuser/typeless-dpimp
+  location: https://github.com/githubuser/fuzzi-impl
 
 library
   ghc-options: -Wall
@@ -39,6 +39,12 @@ library
       , mtl
       , logfloat
       , pretty
+      , aeson
+      , attoparsec
+      , unordered-containers
+      , text
+      , vector
+      , scientific
   exposed-modules:
       Lib
       , Syntax
@@ -52,7 +58,7 @@ library
   build-tools:
       alex, happy
   other-modules:
-      Paths_typeless_dpimp
+      Paths_fuzzi_impl
   default-language: Haskell2010
 
 executable fuzzi
@@ -62,15 +68,17 @@ executable fuzzi
   ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall
   build-depends:
       base >=4.7 && <5
-      , typeless-dpimp
+      , fuzzi-impl
       , options
       , pretty
       , containers
+      , aeson
+      , bytestring
   other-modules:
-      Paths_typeless_dpimp
+      Paths_fuzzi_impl
   default-language: Haskell2010
 
-test-suite typeless-dpimp-test
+test-suite fuzzi-impl-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   hs-source-dirs:
@@ -78,7 +86,7 @@ test-suite typeless-dpimp-test
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base >=4.7 && <5
-    , typeless-dpimp
+    , fuzzi-impl
   other-modules:
-      Paths_typeless_dpimp
+      Paths_fuzzi_impl
   default-language: Haskell2010

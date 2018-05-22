@@ -163,7 +163,7 @@ tcCmdTopLevelDecls = foldCmdM tcCassign tcCAupdate tcCLupdate
 
     tcBsum _ _ _ _ _ _ = return empty
 
-    tcPartition _ _ _ _ _ _ _ = return empty
+    tcPartition _ _ _ _ _ _ _ _ = return empty
 
 tcCmd' :: Context -> Cmd -> TcM ()
 tcCmd' ctx c =
@@ -252,7 +252,7 @@ tcCmd' ctx c =
 
     tcBsum posn _ _ _ _ _ = tcError posn "Bagsum should have been desugared"
 
-    tcPartition posn _ _ _ _ _ _ = tcError posn "Partition should have been desugared"
+    tcPartition posn _ _ _ _ _ _ _ = tcError posn "Partition should have been desugared"
 
 tcCmd :: Cmd -> TcM Context
 tcCmd c = do

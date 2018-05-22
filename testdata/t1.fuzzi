@@ -20,6 +20,6 @@ zs2 : { { int } };
 
 j : int;
 
-partition(zs, zs2, tx, i, j, {
+partition(zs, zs2, tx, i, j, 10, {
   j = tx * 2;
 });

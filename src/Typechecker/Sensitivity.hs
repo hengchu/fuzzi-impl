@@ -185,7 +185,7 @@ checkToplevelDecl =
         checkBmap _ _ _ _ _ _ _ = empty
         checkAmap _ _ _ _ _ _ _ = empty
         checkBsum _ _ _ _ _ _ = empty
-        checkPartition _ _ _ _ _ _ _ = empty
+        checkPartition _ _ _ _ _ _ _ _ = empty
 
 readVars :: Cmd -> S.Set String
 readVars (CAssign _ _ rhs) = freeVars rhs
@@ -327,7 +327,7 @@ checkCmd' bctxt cmd@(CBSum posn invar outvar _ _ bound) = \(ctx, mvs) ->
   in (M.insert outvar sout ctx', mvs', 0)
 checkCmd'
   bctxt
-  cmd@(CPartition _ invar outvar tvar ivar outindex partCmd) = \(ctx, mvs) ->
+  cmd@(CPartition _ invar outvar tvar ivar outindex _ partCmd) = \(ctx, mvs) ->
   let desugaredCmd = desugar cmd
       (ctx', mvs', _)  = checkCmd' bctxt desugaredCmd (ctx, mvs)
       (cctx, cmvs, ep) = checkCmd' bctxt partCmd (M.insert tvar (S infinity) .

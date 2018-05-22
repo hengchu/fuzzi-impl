@@ -177,7 +177,7 @@ prettyCmd =
         <> comma <+> prettyExpr (ELit posn b) 0
         <> rparen
 
-    prettyPartition _ invar outvar tvar ivar outindex c =
+    prettyPartition _ invar outvar tvar ivar outindex npart c =
       text "partition"
         <> lparen
         <> text invar
@@ -185,6 +185,7 @@ prettyCmd =
         <> comma <+> text tvar
         <> comma <+> text ivar
         <> comma <+> text outindex
+        <> comma <+> int npart
         <> comma <+> lbrace
         $$
         nest 2 c

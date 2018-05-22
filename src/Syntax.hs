@@ -84,6 +84,7 @@ data Cmd = CAssign  Position String Expr
                       String   -- ^temp variable
                       String   -- ^index variable
                       String   -- ^out partition index variable
+                      Int      -- ^number of partitions to create
                       Cmd      -- ^partition operation
   deriving (Show, Eq)
 
@@ -100,7 +101,7 @@ cmdPosn (CSkip      p) = p
 cmdPosn (CBMap      p _ _ _ _ _ _) = p
 cmdPosn (CAMap      p _ _ _ _ _ _) = p
 cmdPosn (CBSum      p _ _ _ _ _) = p
-cmdPosn (CPartition p _ _ _ _ _ _) = p
+cmdPosn (CPartition p _ _ _ _ _ _ _) = p
 
 -- | Traverses to the left most EIndex where the term being indexed is a
 -- variable. This is a partial function.
@@ -118,8 +119,8 @@ desugar c =
       -> desugarAMap posn invar outvar tvar ivar outtemp cmd
     CBSum  posn invar outvar tvar ivar bound
       -> desugarBSum posn invar outvar tvar ivar bound
-    CPartition posn invar outvar tvar ivar outindex cmd
-      -> desugarPartition posn invar outvar tvar ivar outindex cmd
+    CPartition posn invar outvar tvar ivar outindex npart cmd
+      -> desugarPartition posn invar outvar tvar ivar outindex npart cmd
     CWhile posn e cmd -> CWhile posn e (desugar cmd)
     CSeq posn c1 c2 -> CSeq posn (desugar c1) (desugar c2)
     CIf posn e ct cf -> CIf posn e (desugar ct) (desugar cf)
@@ -158,20 +159,36 @@ desugarBSum posn invar outvar tvar ivar bound =
                    (CAssign posn outvar runningSum) `cseq`
                    (incrementVar posn ivar)
 
-desugarPartition :: Position -> String -> String -> String -> String -> String -> Cmd -> Cmd
-desugarPartition posn invar outvar tvar ivar outindex partCmd =
+desugarPartition :: Position
+                 -> String
+                 -> String
+                 -> String
+                 -> String
+                 -> String
+                 -> Int
+                 -> Cmd
+                 -> Cmd
+desugarPartition posn invar outvar tvar ivar outindex npart partCmd =
+  (CAssign posn ivar (intLit posn 0)) `cseq`
+  initializePartitions `cseq`
   (CAssign posn ivar (intLit posn 0)) `cseq`
   (CWhile posn loopCond loopBody)
   where cseq = CSeq posn
+        initCond = EBinop posn (EVar posn ivar) LT (intLit posn npart)
+        outExpr  = EVar posn outvar
+        initBody = (CLUpdate posn outExpr (EBinop posn (ELength posn outExpr) PLUS (intLit posn 1))) `cseq`
+                   (incrementVar posn ivar)
+        initializePartitions = CWhile posn initCond initBody
         loopCond = EBinop posn
                           (EVar posn ivar)
                           LT
                           (ELength posn (EVar posn invar))
+        validPartExpr = EBinop posn (EVar posn outindex) LT (intLit posn npart)
         loopBody = (CAssign posn
                             tvar
                             (EIndex posn (EVar posn invar) (EVar posn ivar))) `cseq`
                    partCmd `cseq`
-                   assignToPart `cseq`
+                   CIf posn validPartExpr assignToPart (CSkip posn) `cseq`
                    (incrementVar posn ivar)
         partExpr = EIndex posn (EVar posn outvar) (EVar posn outindex)
         partLenExpr = ELength posn partExpr
@@ -284,7 +301,7 @@ foldCmd :: (Position -> String -> Expr -> a)
         -> (Position -> String -> String -> String -> String -> String -> a -> a)
         -> (Position -> String -> String -> String -> String -> String -> a -> a)
         -> (Position -> String -> String -> String -> String -> Literal -> a)
-        -> (Position -> String -> String -> String -> String -> String -> a -> a)
+        -> (Position -> String -> String -> String -> String -> String -> Int -> a -> a)
         -> Cmd
         -> a
 foldCmd fassign faupdate flupdate flaplace fif fwhile fdecl fseq fskip fbmap famap fbsum fpart c =
@@ -307,8 +324,8 @@ foldCmd fassign faupdate flupdate flaplace fif fwhile fdecl fseq fskip fbmap fam
       famap posn invar outvar tvar ivar outtemp (recur mapCmd)
     CBSum posn invar outvar tvar ivar bound ->
       fbsum posn invar outvar tvar ivar bound
-    CPartition posn invar outvar tvar ivar outindex partCmd ->
-      fpart posn invar outvar tvar ivar outindex (recur partCmd)
+    CPartition posn invar outvar tvar ivar outindex npart partCmd ->
+      fpart posn invar outvar tvar ivar outindex npart (recur partCmd)
   where recur = foldCmd fassign faupdate flupdate flaplace fif fwhile fdecl fseq fskip fbmap famap fbsum fpart
 
 foldCmdA :: (Applicative f)
@@ -324,7 +341,7 @@ foldCmdA :: (Applicative f)
          -> (Position -> String -> String -> String -> String -> String -> f a -> f a)
          -> (Position -> String -> String -> String -> String -> String -> f a -> f a)
          -> (Position -> String -> String -> String -> String -> Literal -> f a)
-         -> (Position -> String -> String -> String -> String -> String -> f a -> f a)
+         -> (Position -> String -> String -> String -> String -> String -> Int -> f a -> f a)
          -> Cmd
          -> f a
 foldCmdA fassign faupdate flupdate flaplace fif fwhile fdecl fseq fskip fbmap famap fbsum fpart c =
@@ -347,8 +364,8 @@ foldCmdA fassign faupdate flupdate flaplace fif fwhile fdecl fseq fskip fbmap fa
       famap posn invar outvar tvar ivar outtemp (recur mapCmd)
     CBSum posn invar outvar tvar ivar bound ->
       fbsum posn invar outvar tvar ivar bound
-    CPartition posn invar outvar tvar ivar outindex partCmd ->
-      fpart posn invar outvar tvar ivar outindex (recur partCmd)
+    CPartition posn invar outvar tvar ivar outindex npart partCmd ->
+      fpart posn invar outvar tvar ivar outindex npart (recur partCmd)
   where recur =
           foldCmdA fassign faupdate flupdate flaplace fif fwhile fdecl fseq fskip fbmap famap fbsum fpart
 
@@ -365,7 +382,7 @@ foldCmdM :: (Monad m)
          -> (Position -> String -> String -> String -> String -> String -> a -> m a)
          -> (Position -> String -> String -> String -> String -> String -> a -> m a)
          -> (Position -> String -> String -> String -> String -> Literal -> m a)
-         -> (Position -> String -> String -> String -> String -> String -> a -> m a)
+         -> (Position -> String -> String -> String -> String -> String -> Int -> a -> m a)
          -> Cmd
          -> m a
 foldCmdM fassign faupdate flupdate flaplace fif fwhile fdecl fseq fskip fbmap famap fbsum fpart c =
@@ -395,8 +412,8 @@ foldCmdM fassign faupdate flupdate flaplace fif fwhile fdecl fseq fskip fbmap fa
       famap posn invar outvar tvar ivar outtemp a
     CBSum posn invar outvar tvar ivar bound ->
       fbsum posn invar outvar tvar ivar bound
-    CPartition posn invar outvar tvar ivar outindex partCmd ->
-      recur partCmd >>= fpart posn invar outvar tvar ivar outindex
+    CPartition posn invar outvar tvar ivar outindex npart partCmd ->
+      recur partCmd >>= fpart posn invar outvar tvar ivar outindex npart
   where recur =
           foldCmdM fassign faupdate flupdate flaplace fif
                    fwhile fdecl fseq fskip    fbmap famap fbsum fpart

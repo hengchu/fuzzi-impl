@@ -9,14 +9,19 @@ import Options
 import Parser
 import Pretty
 import Syntax
+import Interp
 import System.Exit
 import Text.PrettyPrint
 import Typechecker.Sensitivity
+import Data.Aeson (eitherDecodeStrict, encode)
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as BSL
 
 data CLIOptions = CLIOptions {
   optFile :: String
   , optTypecheck :: Bool
   , optPretty :: Bool
+  , optInterp :: String
   }
 
 instance Options CLIOptions where
@@ -27,6 +32,8 @@ instance Options CLIOptions where
                      "Run typechecker?"
     <*> simpleOption "pretty" False
                      "Pretty print instead?"
+    <*> simpleOption "interp" ""
+                     "Run the interpreter instead?"
 
 main :: IO ()
 main = runCommand $ \opts _ -> do
@@ -40,7 +47,7 @@ main = runCommand $ \opts _ -> do
     putStr . render . prettyCmd . desugar $ ast
     exitWith ExitSuccess
 
-  when (optTypecheck opts) $ do
+  when (optTypecheck opts && length (optInterp opts) == 0) $ do
     let result = checkCmd ast
     case result of
       Left  errs      -> forM_ errs putStrLn
@@ -48,3 +55,12 @@ main = runCommand $ \opts _ -> do
         putStrLn $ "Epsilon = " ++ show ep
         forM_ (M.toList ctx) $ \(x, s) -> do
           putStrLn $ x ++ " : " ++ show s
+    exitWith ExitSuccess
+
+  when ((length $ optInterp opts) > 0) $ do
+    fileContent <- BS.readFile (optInterp opts)
+    case eitherDecodeStrict fileContent of
+      Left err  -> putStrLn err
+      Right mem -> do
+        let mem' = interp (desugar ast) (getJsonMemory mem)
+        BSL.putStrLn . encode . JsonMemory $ mem'
