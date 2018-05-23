@@ -1,0 +1,32 @@
+db: 	{ { x1: float, x2: float, y: int } }
+db1: 	{ {one: float, x1: float, x2: float, y: int } }
+
+w: 		{b: float, w1: float, w2: float} 
+dws: 	{ {b: float, w1: float, w2: float} }
+temp: 	{b: float, w1: float, w2: float} 
+t: 		float;
+
+dbias = { float };
+dw1 = 	{ float };
+dw2 = 	{ float };
+
+gbias: 	float;
+gw1: 	float;
+gw2: 	float;
+i: 	int;
+
+
+trow: 	{ x1: float, x2: float, y: int };
+trow1: 	{one: float, x1: float, x2: float, y: int };
+
+bmap(db, db1, trow, i , trow_out, {
+	trow_out = {one: 1.0, x1: trow.x1, x2: trow.x2, y:trow.y}
+})
+
+bmap(db1, dws, trow1, w, w_out, {
+	t = trow1.one * w.b + trow1.x1 * w.w1 + trow1.x2 * w.w2;
+	prob = 1/(1 + exp(-1 * trow1.y * t));
+	w_temp = {b: trow1.one, w1: trow1.x1, w2: trow1.x2};
+	w_out = (1 - prob) * trow1.y * w_temp
+})
+
