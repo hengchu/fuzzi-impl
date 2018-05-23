@@ -155,7 +155,10 @@ Expr
   | '(' Expr ')' %prec ATOM                  { $2 }
   | '[' ManyExprs ']'                        { EArray (token2Position $1) $2 }
   | '{' ManyExprs '}'                        { EArray (token2Position $1) $2 }
-  | float '(' Expr ')'                       { EFloat (token2Position $1) $3 }
+  | ident '(' Expr ')'                       { case getIdent $1 of
+                                                 "float" -> EFloat (token2Position $1) $3
+                                                 x -> error $ "Unknown function: " ++ x
+                                             }
   | exp '(' Expr ')'                         { EExp (token2Position $1) $3 }
   | clip '(' Expr ',' Literal ')'            { EClip (token2Position $1) $3 (fst $5) }
 

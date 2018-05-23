@@ -22,3 +22,7 @@ j : int;
 partition(zs, zs2, tx, i, j, 10, {
   j = tx * 2;
 });
+
+f : float;
+
+f = exp(float(j));

@@ -138,6 +138,14 @@ interpExpr (EArray _ exprs) m =
 interpExpr (EBag _ exprs) m =
   let vs = fmap (\e -> interpExpr e m) exprs
   in VArr (length vs) vs
+interpExpr (EExp posn e) m =
+  case interpExpr e m of
+    VFloat f -> VFloat (exp f)
+    _ -> throw . MkException posn $ FuzziTypeError
+interpExpr (EFloat posn e) m =
+  case interpExpr e m of
+    VInt i -> VFloat . fromIntegral $ i
+    _ -> throw . MkException posn $ FuzziTypeError
 interpExpr (EClip posn e lit) m =
   clip (interpExpr e m) (interpLiteral lit)
   where
