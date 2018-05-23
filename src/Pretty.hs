@@ -39,7 +39,8 @@ prettyExpr :: Expr -> Int -> Doc
 prettyExpr e =
   foldExpr prettyVar prettyLen prettyLit prettyBinop
            prettyIndex prettyUpdate prettyAccess
-           prettyArray prettyBag prettyClip
+           prettyArray prettyBag prettyFloat
+           prettyExp prettyClip
            e
 
   where prettyVar _ x = \_ -> text x
@@ -85,6 +86,10 @@ prettyExpr e =
         prettyArray _ pexprs = \_ -> lbrack <> prettyArrContents pexprs <> rbrack
 
         prettyBag _ exprs = \_ -> lbrace <> prettyArrContents exprs <> rbrace
+
+        prettyFloat _ pexpr = \_ -> text "float" <> lparen <> pexpr 0 <> rparen
+
+        prettyExp _ pexpr = \_ -> text "exp" <> lparen <> pexpr 0 <> rparen
 
         prettyClip posn pv lit = \_ ->
           text "clip" <> lparen <> pv 0 <> comma <+> prettyLit posn lit (0 :: Int) <> rparen

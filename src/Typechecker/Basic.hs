@@ -35,7 +35,9 @@ tcErrorIf cond posn err val =
   if cond then tcError posn err else pure val
 
 tcExpr :: Context -> Expr -> TcM LargeType
-tcExpr ctx = foldExprM tcVar tcLength tcLit tcBinop tcIndex tcRupdate tcRaccess tcArray tcBag tcClip
+tcExpr ctx = foldExprM tcVar tcLength tcLit tcBinop tcIndex
+                       tcRupdate tcRaccess tcArray
+                       tcBag tcFloat tcExp tcClip
   where tcVar posn = \var ->
           case M.lookup var ctx of
             Nothing -> tcError posn $ "Unknown variable: " ++ var
@@ -146,6 +148,16 @@ tcExpr ctx = foldExprM tcVar tcLength tcLit tcBinop tcIndex tcRupdate tcRaccess 
                          LTAny
                          lts
           return $ LTBag contentLt
+
+        tcFloat posn = \t -> do
+          when (t /= LTSmall STInt) $
+            tcError posn "float() must be applied to int"
+          return (LTSmall STFloat)
+
+        tcExp posn = \t -> do
+          when (t /= LTSmall STFloat) $
+            tcError posn "exp() must be applied to float"
+          return t
 
         tcClip posn = \tv lit -> do
           tlit <- tcExpr ctx (ELit posn lit)

@@ -71,7 +71,8 @@ checkExpr :: TB.Context -> Context -> Expr -> Sensitivity
 checkExpr bctxt ctx e =
   fst $ foldExpr checkVar checkLength checkLit checkBinop
                  checkIndex checkRupdate checkRaccess
-                 checkArray checkBag checkClip e
+                 checkArray checkBag checkFloat
+                 checkExp checkClip e
   where
     checkVar _ x = (ctx ! x, bctxt ! x)
 
@@ -130,6 +131,11 @@ checkExpr bctxt ctx e =
         _ -> error "Impossible: the basic typechecker should not allow arrays with large types"
       where (sens, typ) = foldr (\(s, t) (acc, _) -> (s + acc, t)) (0, LTAny) sexprs
 
+    checkFloat _ (s, _) = (s, LTSmall STFloat)
+
+    checkExp _ (s, t) =
+      if s > 0 then (S infinity, t) else (0, t)
+
     checkBag _ sexprs =
       case typ of
         LTAny -> (2 * sens, LTBag LTAny)
@@ -166,7 +172,8 @@ freeVars :: Expr -> S.Set String
 freeVars =
   foldExpr checkVar checkLength checkLit checkBinop
            checkIndex checkRupdate checkRaccess
-           checkArray checkBag checkClip
+           checkArray checkBag checkFloat
+           checkExp checkClip
   where
     checkVar _ x = S.singleton x
     checkLength _ fvs = fvs
@@ -177,6 +184,8 @@ freeVars =
     checkArray _ sarr = foldr S.union S.empty sarr
     checkBag _ sarr = foldr S.union S.empty sarr
     checkRaccess _ sr _ = sr
+    checkFloat _ s = s
+    checkExp _ s = s
     checkClip _ s _ = s
 
 checkToplevelDecl :: Cmd -> Context

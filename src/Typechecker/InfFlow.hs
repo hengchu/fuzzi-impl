@@ -17,7 +17,10 @@ approx inf1 inf2 = inf1 || inf2
 
 checkExpr :: Context -> Expr -> Bool
 checkExpr ctx e =
-  foldExpr checkVar checkLength checkLit checkBinop checkIndex checkRupdate checkRaccess checkArray checkBag checkClip e
+  foldExpr checkVar checkLength checkLit
+           checkBinop checkIndex checkRupdate
+           checkRaccess checkArray checkBag
+           checkFloat checkExp checkClip e
   where
     checkVar _ x = ctx ! x
 
@@ -41,6 +44,10 @@ checkExpr ctx e =
     checkArray _ _ = error "Not implemented"
 
     checkBag _ _ = error "Not implemented"
+
+    checkFloat = error "Not implemented"
+
+    checkExp = error "Not implemented"
 
     checkClip _ infE _ = infE
 

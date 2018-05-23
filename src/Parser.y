@@ -55,6 +55,7 @@ import Prelude hiding (LT, GT, EQ)
   bsum      { TBSum _ }
   partition { TPartition _ }
   length    { TLength _ }
+  exp       { TExp _ }
   clip      { TClip _ }
 
 %right ';'
@@ -154,6 +155,8 @@ Expr
   | '(' Expr ')' %prec ATOM                  { $2 }
   | '[' ManyExprs ']'                        { EArray (token2Position $1) $2 }
   | '{' ManyExprs '}'                        { EArray (token2Position $1) $2 }
+  | float '(' Expr ')'                       { EFloat (token2Position $1) $3 }
+  | exp '(' Expr ')'                         { EExp (token2Position $1) $3 }
   | clip '(' Expr ',' Literal ')'            { EClip (token2Position $1) $3 (fst $5) }
 
 SmallLiteral
