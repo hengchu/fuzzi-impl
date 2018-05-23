@@ -82,7 +82,9 @@ tcExpr ctx = foldExprM tcVar tcLength tcLit tcBinop tcIndex
 
         tcBinop posn = \tl bop tr ->
           if tl /= tr
-          then tcError posn "Binary operation applied to two different types."
+          then tcError posn
+                 $ "Binary operation applied to two different types: "
+                   ++ show tl ++ "," ++ show tr
           else case bop of
             LT -> tcErrorIf (not $ isNumericLT tl) posn comparisonTcError (LTSmall STBool)
             LE -> tcErrorIf (not $ isNumericLT tl) posn comparisonTcError (LTSmall STBool)
