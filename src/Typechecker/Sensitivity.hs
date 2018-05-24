@@ -331,9 +331,7 @@ checkCmd' bctxt cmd@(CBMap _ invar outvar tvar ivar outtemp c) = \(ctx, mvs) ->
       onlySensVarModified = scmvs `S.isSubsetOf` (S.fromList [outtemp])
       onlyUsesT = cInputs `S.isSubsetOf` (S.fromList [tvar])
 
-  in traceShow scmvs .
-     traceShow cctx $
-     if deterministic && onlySensVarModified && onlyUsesT
+  in if deterministic && onlySensVarModified && onlyUsesT
      then (S.foldr
              (\x -> M.insert x (cctx ! x))
              (M.insert outvar (ctx ! invar) ctx')
