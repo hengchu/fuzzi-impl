@@ -15,6 +15,7 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 import qualified Typechecker.Basic   as TB
 import Data.Number.Transfinite
+import Debug.Trace
 
 -- The derived Ord instance is the subtype relationship between sensitivity
 -- types.
@@ -330,8 +331,13 @@ checkCmd' bctxt cmd@(CBMap _ invar outvar tvar ivar outtemp c) = \(ctx, mvs) ->
       onlySensVarModified = scmvs `S.isSubsetOf` (S.fromList [outtemp])
       onlyUsesT = cInputs `S.isSubsetOf` (S.fromList [tvar])
 
-  in if deterministic && onlySensVarModified && onlyUsesT
-     then (M.insert outvar (ctx ! invar) ctx', mvs', 0)
+  in traceShow scmvs .
+     traceShow cctx $
+     if deterministic && onlySensVarModified && onlyUsesT
+     then (S.foldr
+             (\x -> M.insert x (cctx ! x))
+             (M.insert outvar (ctx ! invar) ctx')
+             cmvs, mvs', 0)
      else (ctx', mvs', infinity)
 checkCmd' bctxt cmd@(CAMap _ invar outvar tvar ivar outtemp c) = \(ctx, mvs) ->
   let desugaredCmd = desugar cmd
@@ -345,7 +351,7 @@ checkCmd' bctxt cmd@(CAMap _ invar outvar tvar ivar outtemp c) = \(ctx, mvs) ->
 
       deterministic = ep == 0
       onlySensVarModified = scmvs `S.isSubsetOf` (S.fromList [outtemp])
-      onlyUsesTandI =cInputs `S.isSubsetOf` (S.fromList [tvar, ivar])
+      onlyUsesTandI = cInputs `S.isSubsetOf` (S.fromList [tvar, ivar])
 
   in if deterministic && onlySensVarModified && onlyUsesTandI
      then (M.insert outvar (cctx ! outtemp) ctx', mvs', 0)
