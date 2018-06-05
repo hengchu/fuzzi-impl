@@ -367,7 +367,7 @@ checkCmd'
   in if deterministic && onlySensVarModified && onlyUsesT
      then (M.insert outvar (C 2 * ctx ! invar) ctx', mvs', 0)
      else (ctx', mvs', infinity)
-checkCmd' bctxt c@(CRepeat _ _ _) = checkCmd' bctxt (desugar c)
+checkCmd' bctxt (CRepeat p n c) = checkCmd' bctxt (desugarRepeat p n c)
 
 checkCmd :: Cmd -> Either [TB.Error] (Context, Epsilon)
 checkCmd c =
