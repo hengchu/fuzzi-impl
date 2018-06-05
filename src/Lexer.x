@@ -60,6 +60,7 @@ $eol                          ;
 "end"                         { \p _ -> TEnd p }
 "do"                          { \p _ -> TDo p }
 "while"                       { \p _ -> TWhile p }
+"repeat"                      { \p _ -> TRepeat p }
 "skip"                        { \p _ -> TSkip p }
 @identifier                   { \p s -> TIdent p s }
 @number \. @number            { \p s -> TFloat p (read s) }
@@ -98,6 +99,7 @@ data Token = TIdent     AlexPosn String
            | TElse      AlexPosn
            | TEnd       AlexPosn
            | TDo        AlexPosn
+           | TRepeat    AlexPosn
            | TWhile     AlexPosn
            | TSkip      AlexPosn
            | TTrue      AlexPosn
@@ -147,6 +149,7 @@ getAlexPosn (TThen      p) = p
 getAlexPosn (TElse      p) = p
 getAlexPosn (TEnd       p) = p
 getAlexPosn (TDo        p) = p
+getAlexPosn (TRepeat    p) = p
 getAlexPosn (TWhile     p) = p
 getAlexPosn (TSkip      p) = p
 getAlexPosn (TTrue      p) = p

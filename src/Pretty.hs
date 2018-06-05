@@ -108,7 +108,7 @@ prettyCmd =
   foldCmd prettyAssign
           prettyLaplace prettyIf prettyWhile prettyDecl
           prettySeq prettySkip prettyBmap prettyAmap
-          prettyBsum prettyPartition
+          prettyBsum prettyPartition prettyRepeat
   where
     prettyAssign _ x e = prettyExpr x 0 <+> equals <+> prettyExpr e 0
 
@@ -212,3 +212,8 @@ prettyCmd =
         nest 2 c
         $$ rbrace
         <> rparen
+
+    prettyRepeat _ iters c =
+      text "repeat" <+> int iters <+> lbrace
+      $$ nest 2 c
+      <> rbrace

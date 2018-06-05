@@ -47,6 +47,7 @@ import Prelude hiding (LT, GT, EQ)
   else      { TElse _ }
   end       { TEnd _ }
   do        { TDo _ }
+  repeat    { TRepeat _ }
   while     { TWhile _ }
   skip      { TSkip _ }
   laplace   { TLaplace _ }
@@ -113,6 +114,7 @@ Cmd
                    (getInt $13)
                    $16
       }
+  | repeat int '{' Cmd '}' { CRepeat (token2Position $1) (getInt $2) $4 }
 
 SmallType
   : ident { case (getIdent $1) of

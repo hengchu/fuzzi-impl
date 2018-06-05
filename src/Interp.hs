@@ -69,19 +69,67 @@ interpOp posn op vlhs vrhs =
     PLUS -> case vlhs of
       VInt _ -> VInt $ caseAnalysis (+) typeError typeError vlhs vrhs
       VFloat _ -> VFloat $ caseAnalysis typeError (+) typeError vlhs vrhs
-      _ -> throw . MkException posn $ typeError
+      VRec vsL -> case vrhs of
+        VRec vsR ->
+          if M.keys vsL /= M.keys vsR
+          then typeError
+          else VRec $ binopRec vsL vsR
+        _ -> typeError
+      VArr lenL vsL -> case vrhs of
+        VArr lenR vsR ->
+          if lenL /= lenR
+          then throw . MkException posn $ FuzziIndexOutOfBound
+          else VArr lenL $ binopArr vsL vsR
+        _ -> typeError
+      _ -> typeError
     MINUS -> case vlhs of
       VInt _ -> VInt $ caseAnalysis (-) typeError typeError vlhs vrhs
       VFloat _ -> VFloat $ caseAnalysis typeError (-) typeError vlhs vrhs
-      _ -> throw . MkException posn $ typeError
+      VRec vsL -> case vrhs of
+        VRec vsR ->
+          if M.keys vsL /= M.keys vsR
+          then typeError
+          else VRec $ binopRec vsL vsR
+        _ -> typeError
+      VArr lenL vsL -> case vrhs of
+        VArr lenR vsR ->
+          if lenL /= lenR
+          then throw . MkException posn $ FuzziIndexOutOfBound
+          else VArr lenL $ binopArr vsL vsR
+        _ -> typeError
+      _ -> typeError
     MULT -> case vlhs of
       VInt _ -> VInt $ caseAnalysis (*) typeError typeError vlhs vrhs
       VFloat _ -> VFloat $ caseAnalysis typeError (*) typeError vlhs vrhs
-      _ -> throw . MkException posn $ typeError
+      VRec vsL -> case vrhs of
+        VRec vsR ->
+          if M.keys vsL /= M.keys vsR
+          then typeError
+          else VRec $ binopRec vsL vsR
+        _ -> typeError
+      VArr lenL vsL -> case vrhs of
+        VArr lenR vsR ->
+          if lenL /= lenR
+          then throw . MkException posn $ FuzziIndexOutOfBound
+          else VArr lenL $ binopArr vsL vsR
+        _ -> typeError
+      _ -> typeError
     DIV -> case vlhs of
       VInt _ -> VInt $ caseAnalysis div typeError typeError vlhs vrhs
       VFloat _ -> VFloat $ caseAnalysis typeError (/) typeError vlhs vrhs
-      _ -> throw . MkException posn $ typeError
+      VRec vsL -> case vrhs of
+        VRec vsR ->
+          if M.keys vsL /= M.keys vsR
+          then typeError
+          else VRec $ binopRec vsL vsR
+        _ -> typeError
+      VArr lenL vsL -> case vrhs of
+        VArr lenR vsR ->
+          if lenL /= lenR
+          then throw . MkException posn $ FuzziIndexOutOfBound
+          else VArr lenL $ binopArr vsL vsR
+        _ -> typeError
+      _ -> typeError
   where caseAnalysis :: (Int -> Int -> a)
                      -> (Float -> Float -> a)
                      -> (Bool -> Bool -> a)
@@ -96,6 +144,10 @@ interpOp posn op vlhs vrhs =
             (_, _) -> throw . MkException posn $ FuzziTypeError
 
         typeError = throw . MkException posn $ FuzziTypeError
+
+        binopRec = M.unionWith (interpOp posn op)
+
+        binopArr = zipWith (interpOp posn op)
 
 interpExpr :: Expr -> Memory -> Value
 interpExpr (EVar posn x) m =

@@ -4,8 +4,8 @@ i  :        int;
 xs :[1.0] { int };
 ys :      { int };
 
-xs1 :[1.0] [ int ];
-ys1 :      [ int ];
+xs1 :[1.0] [ int ](5);
+ys1 :      [ int ](5);
 
 bmap(xs, ys, tx, i, ty, {
   ty = tx * 2;
@@ -29,5 +29,4 @@ f = exp(float(j));
 ys1 = [1, 2, 3, 4, 5];
 xs1 = [1, 2, 3, 4, 5];
 
-f = dot(ys1, xs1);
-xs1 = scale(f, xs1);
+xs1 = xs1 * ys1;

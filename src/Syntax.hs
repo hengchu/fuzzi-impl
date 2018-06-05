@@ -101,6 +101,9 @@ data Cmd = CAssign  Position Expr Expr
                       String   -- ^out partition index variable
                       Int      -- ^number of partitions to create
                       Cmd      -- ^partition operation
+         | CRepeat Position
+                   Int
+                   Cmd
   deriving (Show, Eq)
 
 cmdPosn :: Cmd -> Position
@@ -115,6 +118,7 @@ cmdPosn (CBMap      p _ _ _ _ _ _) = p
 cmdPosn (CAMap      p _ _ _ _ _ _) = p
 cmdPosn (CBSum      p _ _ _ _ _) = p
 cmdPosn (CPartition p _ _ _ _ _ _ _) = p
+cmdPosn (CRepeat    p _ _) = p
 
 -- | Traverses to the left most EIndex where the term being indexed is a
 -- variable. This is a partial function.
@@ -142,6 +146,7 @@ desugar c =
     CWhile posn e cmd -> CWhile posn e (desugar cmd)
     CSeq posn c1 c2 -> CSeq posn (desugar c1) (desugar c2)
     CIf posn e ct cf -> CIf posn e (desugar ct) (desugar cf)
+    CRepeat posn iters cmd -> desugarRepeat posn iters (desugar cmd)
     _ -> c
 
 intLit :: Position -> Int -> Expr
@@ -150,6 +155,10 @@ intLit posn = ELit posn . SLit . SILit
 incrementVar :: Position -> Expr -> Cmd
 incrementVar posn x =
   CAssign posn x (EBinop posn x PLUS (intLit posn 1))
+
+desugarRepeat :: Position -> Int -> Cmd -> Cmd
+desugarRepeat p n c | n > 0     = (CSeq p) c (desugarRepeat p (n-1) c)
+                    | otherwise = CSkip p
 
 desugarBMap :: Position -> String -> String -> String -> String -> String -> Cmd -> Cmd
 desugarBMap posn invar outvar tvar ivar outtvar mapCmd =
@@ -396,9 +405,10 @@ foldCmd :: (Position -> Expr -> Expr -> a)
         -> (Position -> String -> String -> String -> String -> String -> a -> a)
         -> (Position -> String -> String -> String -> String -> Literal -> a)
         -> (Position -> String -> String -> String -> String -> String -> Int -> a -> a)
+        -> (Position -> Int -> a -> a)
         -> Cmd
         -> a
-foldCmd fassign flaplace fif fwhile fdecl fseq fskip fbmap famap fbsum fpart c =
+foldCmd fassign flaplace fif fwhile fdecl fseq fskip fbmap famap fbsum fpart frepeat c =
   case c of
     CAssign posn x e -> fassign posn x e
     CLaplace posn x width mean -> flaplace posn x width mean
@@ -418,7 +428,9 @@ foldCmd fassign flaplace fif fwhile fdecl fseq fskip fbmap famap fbsum fpart c =
       fbsum posn invar outvar tvar ivar bound
     CPartition posn invar outvar tvar ivar outindex npart partCmd ->
       fpart posn invar outvar tvar ivar outindex npart (recur partCmd)
-  where recur = foldCmd fassign flaplace fif fwhile fdecl fseq fskip fbmap famap fbsum fpart
+    CRepeat posn iters cmd ->
+      frepeat posn iters (recur cmd)
+  where recur = foldCmd fassign flaplace fif fwhile fdecl fseq fskip fbmap famap fbsum fpart frepeat
 
 foldCmdA :: (Applicative f)
          => (Position -> Expr -> Expr -> f a)
@@ -432,9 +444,10 @@ foldCmdA :: (Applicative f)
          -> (Position -> String -> String -> String -> String -> String -> f a -> f a)
          -> (Position -> String -> String -> String -> String -> Literal -> f a)
          -> (Position -> String -> String -> String -> String -> String -> Int -> f a -> f a)
+         -> (Position -> Int -> f a -> f a)
          -> Cmd
          -> f a
-foldCmdA fassign flaplace fif fwhile fdecl fseq fskip fbmap famap fbsum fpart c =
+foldCmdA fassign flaplace fif fwhile fdecl fseq fskip fbmap famap fbsum fpart frepeat c =
   case c of
     CAssign  posn x e -> fassign posn x e
     CLaplace posn x width mean -> flaplace posn x width mean
@@ -454,8 +467,10 @@ foldCmdA fassign flaplace fif fwhile fdecl fseq fskip fbmap famap fbsum fpart c 
       fbsum posn invar outvar tvar ivar bound
     CPartition posn invar outvar tvar ivar outindex npart partCmd ->
       fpart posn invar outvar tvar ivar outindex npart (recur partCmd)
+    CRepeat posn iters cmd ->
+      frepeat posn iters (recur cmd)
   where recur =
-          foldCmdA fassign flaplace fif fwhile fdecl fseq fskip fbmap famap fbsum fpart
+          foldCmdA fassign flaplace fif fwhile fdecl fseq fskip fbmap famap fbsum fpart frepeat
 
 foldCmdM :: (Monad m)
          => (Position -> Expr -> Expr -> m a)
@@ -469,9 +484,10 @@ foldCmdM :: (Monad m)
          -> (Position -> String -> String -> String -> String -> String -> a -> m a)
          -> (Position -> String -> String -> String -> String -> Literal -> m a)
          -> (Position -> String -> String -> String -> String -> String -> Int -> a -> m a)
+         -> (Position -> Int -> a -> m a)
          -> Cmd
          -> m a
-foldCmdM fassign flaplace fif fwhile fdecl fseq fskip fbmap famap fbsum fpart c =
+foldCmdM fassign flaplace fif fwhile fdecl fseq fskip fbmap famap fbsum fpart frepeat c =
   case c of
     CAssign  posn x e -> fassign posn x e
     CLaplace posn x width mean -> flaplace posn x width mean
@@ -498,11 +514,13 @@ foldCmdM fassign flaplace fif fwhile fdecl fseq fskip fbmap famap fbsum fpart c 
       fbsum posn invar outvar tvar ivar bound
     CPartition posn invar outvar tvar ivar outindex npart partCmd ->
       recur partCmd >>= fpart posn invar outvar tvar ivar outindex npart
+    CRepeat posn iters cmd ->
+      recur cmd >>= frepeat posn iters
   where recur =
           foldCmdM fassign flaplace fif
                    fwhile fdecl fseq fskip
-                   fbmap famap fbsum fpart
+                   fbmap famap fbsum fpart frepeat
         recur1 newfskip =
           foldCmdM fassign flaplace fif
                    fwhile fdecl fseq newfskip
-                   fbmap famap fbsum fpart
+                   fbmap famap fbsum fpart frepeat

@@ -191,6 +191,7 @@ checkToplevelDecl =
     checkAmap
     checkBsum
     checkPartition
+    checkRepeat
   where checkAssign _ _ _ = empty
         checkLaplace _ _ _ _ = empty
         checkIf _ _ _ _ = empty
@@ -202,6 +203,7 @@ checkToplevelDecl =
         checkAmap _ _ _ _ _ _ _ = empty
         checkBsum _ _ _ _ _ _ = empty
         checkPartition _ _ _ _ _ _ _ _ = empty
+        checkRepeat _ _ _ = empty
 
 readVars :: Cmd -> S.Set String
 readVars (CAssign _ lhs rhs) =
@@ -275,6 +277,8 @@ checkCmd' bctxt (CLaplace _ x width e) = \(ctx, mvs) ->
                      calcEps s width)
        LTRow rt  -> (M.insert x 0 ctx, mvs',
                      (fromIntegral . M.size . getRowTypes $ rt) * calcEps s width)
+       LTArray _ (Just len) -> (M.insert x 0 ctx, mvs',
+                                fromIntegral len * calcEps s width)
        _ -> error $ "Impossible: laplace mechanism should only be applied to numeric variables, "
                     ++ "this should have been caught by basic typechecker"
 checkCmd' bctxt (CIf _ e ct cf) = \(ctx, mvs) ->
@@ -363,6 +367,7 @@ checkCmd'
   in if deterministic && onlySensVarModified && onlyUsesT
      then (M.insert outvar (C 2 * ctx ! invar) ctx', mvs', 0)
      else (ctx', mvs', infinity)
+checkCmd' bctxt c@(CRepeat _ _ _) = checkCmd' bctxt (desugar c)
 
 checkCmd :: Cmd -> Either [TB.Error] (Context, Epsilon)
 checkCmd c =

@@ -11,6 +11,8 @@ import Data.List
 import Data.Map
 import Data.Map as M
 import Prelude hiding (LT, EQ, GT)
+import Pretty
+import qualified Text.PrettyPrint as PP
 
 type Context = Map String LargeType
 
@@ -34,6 +36,25 @@ tcError (Position line col) err = TcM . Left $ [errMsg]
 tcErrorIf :: Bool -> Position -> String -> a -> TcM a
 tcErrorIf cond posn err val =
   if cond then tcError posn err else pure val
+
+isNumericST :: SmallType -> Bool
+isNumericST = \case
+  STInt -> True
+  STFloat -> True
+  _ -> False
+
+isNumericRT :: M.Map String SmallType -> Bool
+isNumericRT rt =
+  M.foldr (\t acc -> (isNumericST t) && acc) True rt
+
+
+isNumericLT :: LargeType -> Bool
+isNumericLT = \case
+  LTSmall STInt -> True
+  LTSmall STFloat -> True
+  LTRow rt -> isNumericRT . getRowTypes $ rt
+  LTArray st _ -> isNumericST st
+  _ -> False
 
 tcExpr :: Context -> Expr -> TcM LargeType
 tcExpr ctx = foldExprM tcVar tcLength tcLit tcBinop tcIndex
@@ -59,20 +80,6 @@ tcExpr ctx = foldExprM tcVar tcLength tcLit tcBinop tcIndex
         tcLit _ = \case
           SLit slit -> pure . LTSmall $ tcSmallLit slit
           RLit (RowLit rlit) -> pure . LTRow . RowType $ M.map tcSmallLit rlit
-
-        isNumericST = \case
-          STInt -> True
-          STFloat -> True
-          _ -> False
-
-        isNumericRT rt =
-          M.foldr (\t acc -> (isNumericST t) && acc) True rt
-
-        isNumericLT = \case
-          LTSmall STInt -> True
-          LTSmall STFloat -> True
-          LTRow rt -> isNumericRT . getRowTypes $ rt
-          _ -> False
 
         isSmallLT = \case
           LTSmall _ -> True
@@ -224,7 +231,7 @@ tcCmdTopLevelDecls :: Cmd -> TcM Context
 tcCmdTopLevelDecls = foldCmdM tcCassign
                               tcClaplace tcCif
                               tcCwhile tcCdecl tcCseq tcCskip tcBmap
-                              tcAmap tcBsum tcPartition
+                              tcAmap tcBsum tcPartition tcRepeat
   where
     tcCassign _ _ _ = pure empty
 
@@ -252,6 +259,8 @@ tcCmdTopLevelDecls = foldCmdM tcCassign
 
     tcPartition _ _ _ _ _ _ _ _ = return empty
 
+    tcRepeat _ _ _ = return empty
+
 tcCmd' :: Context -> Cmd -> TcM ()
 tcCmd' ctx c =
   foldCmdA
@@ -266,6 +275,7 @@ tcCmd' ctx c =
     tcAmap
     tcBsum
     tcPartition
+    tcRepeat
     c
   where
     isValidLhsExpr = \case
@@ -281,22 +291,21 @@ tcCmd' ctx c =
     ltCompat LTAny _                                   = True
     ltCompat _ LTAny                                   = True
     ltCompat (LTBag t1)     (LTBag t2)                 = ltCompat t1 t2
-    ltCompat (LTArray t1 Nothing) (LTArray t2 Nothing) = stCompat t1 t2
+    ltCompat (LTArray t1 Nothing) (LTArray t2 _)       = stCompat t1 t2
     ltCompat (LTArray t1 (Just len1)) (LTArray t2 (Just len2)) = stCompat t1 t2 && len1 == len2
     ltCompat (LTSmall t1)   (LTSmall t2)               = stCompat t1 t2
     ltCompat t1 t2 = t1 == t2
 
     tcCassign posn lhs e = do
       case lhs of
-        ELength _ arr -> do
-          t <- tcExpr ctx arr
-          case t of
+        ELength _ arrExp -> do
+          arrTyp <- tcExpr ctx arrExp
+          case arrTyp of
             LTArray _ (Just _) ->
-              tcError posn "Cannot change the length of a fixed length array"
+              tcError posn $ "Cannot change length() of a fixed-length array: " ++ (PP.render $ prettyExpr lhs 0)
             _ -> return ()
-          tcAssignCompat posn lhs e
-        _ ->
-          tcAssignCompat posn lhs e
+        _ -> return ()
+      tcAssignCompat posn lhs e
 
     tcAssignCompat posn lhs e = do
       when (not $ isValidLhsExpr lhs) $
@@ -306,7 +315,19 @@ tcCmd' ctx c =
       when (not $ ltCompat t te) $
         tcError posn $ assignTcError lhs e
 
-    tcClaplace posn x _ rhs = tcCassign posn (EVar posn x) rhs
+    tcClaplace posn x _ rhs = do
+      case M.lookup x ctx of
+        Nothing -> tcError posn $ "Unknown variable: " ++ x
+        Just t  -> do
+          when (not $ isNumericLT t) $ do
+            tcError posn $ "Laplace mechanism only applies to numeric types"
+          case t of
+            LTArray _ Nothing ->
+              tcError posn $ "Laplace mechanism can't be applied to arrays with unknown length"
+            _ -> return ()
+          trhs <- tcExpr ctx rhs
+          when (trhs /= t) $ do
+            tcError posn $ "Type mismatch in laplace mechanism"
 
     tcCond e = do
       te <- tcExpr ctx e
@@ -333,6 +354,8 @@ tcCmd' ctx c =
     tcBsum posn _ _ _ _ _ = tcError posn "Bagsum should have been desugared"
 
     tcPartition posn _ _ _ _ _ _ _ = tcError posn "Partition should have been desugared"
+
+    tcRepeat _ _ tcBody = tcBody
 
 tcCmd :: Cmd -> TcM Context
 tcCmd c = do
@@ -363,7 +386,7 @@ multiDeclTcError multiDecls =
 
 assignTcError :: Expr -> Expr -> Error
 assignTcError lhs rhs =
-  "Assignment type mismatch in: " ++ show lhs ++ " = " ++ show rhs
+  "Assignment type mismatch in: " ++ (PP.render $ prettyExpr lhs 0) ++ " = " ++ (PP.render $ prettyExpr rhs 0)
 
 undeclaredVariableTcError :: String -> Error
 undeclaredVariableTcError var =
@@ -371,14 +394,18 @@ undeclaredVariableTcError var =
 
 indexNotIntTcError :: Expr -> Error
 indexNotIntTcError eidx =
-  "The index expression: " ++ show eidx ++ " is not an int"
+  "The index expression: " ++ (PP.render $ prettyExpr eidx 0) ++ " is not an int"
 
 arrayUpdateTcError :: Expr -> Expr -> Expr -> Error
 arrayUpdateTcError arr idx rhs =
-  "Array update type mismatch in: " ++ show arr ++ "[" ++ show idx ++ "]" ++ " = " ++ show rhs
+  "Array update type mismatch in: "
+  ++ (PP.render $ prettyExpr arr 0)
+  ++ "[" ++ (PP.render $ prettyExpr idx 0) ++ "]"
+  ++ " = "
+  ++ (PP.render $ prettyExpr rhs 0)
 
 condNotBoolTcError :: Expr -> Error
-condNotBoolTcError econd = "Condition expression: " ++ show econd ++ " is not a boolean"
+condNotBoolTcError econd = "Condition expression: " ++ (PP.render $ prettyExpr econd 0) ++ " is not a boolean"
 
 lengthTcError :: Error
 lengthTcError = "length() can only be applied to array or bag expressions"
@@ -389,7 +416,7 @@ lengthUpdateLhsTcError =
 
 invalidLhsExprError :: Expr -> Error
 invalidLhsExprError lhs =
-  "The LHS of assignment is invalid: " ++ show lhs
+  "The LHS of assignment is invalid: " ++ (PP.render $ prettyExpr lhs 0)
 
 scaleError :: Error
 scaleError =
