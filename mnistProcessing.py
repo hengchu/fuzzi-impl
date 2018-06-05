@@ -6,6 +6,7 @@ import random
 
 ORIG_SIZE = 28;
 NEW_SIZE = 10;
+NUM_PARTITIONS = 10;
 
 #Total number of available samples, can set to less if we don't need all of them
 TRAINING_EXAMPLES = 12665;
@@ -41,9 +42,11 @@ binary_labels = [labels[i] for i in all_indices]
 N = TRAINING_EXAMPLES
 
 smaller_images = []
+rand = []
 
 for i in range(N):
 	smaller_images.append(resize(binary_images[i]))
+	rand.append(random.randint(0, NUM_PARTITIONS))
 
 data = {}
 
@@ -54,6 +57,7 @@ with open('testdata/mnist.json','w') as outfile:
 		data['y' + str(i)] = binary_labels[i]
 		outfile.write('\t\"x' + str(i) + '\": ' + str(smaller_images[i]) + ',\n')
 		outfile.write('\t\"y' + str(i) + '\": ' + str(binary_labels[i]) + ',\n')
+		outfile.write('\t\"r' + str(i) + '\": ' + str(rand[i]) + ',\n')	
 	outfile.write('}')
 
 	#json.dump(data, outfile, indent=4, sort_keys=True)
