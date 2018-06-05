@@ -24,5 +24,10 @@ partition(zs, zs2, tx, i, j, 10, {
 });
 
 f : float;
-
 f = exp(float(j));
+
+ys1 = [1, 2, 3, 4, 5];
+xs1 = [1, 2, 3, 4, 5];
+
+f = dot(ys1, xs1);
+xs1 = scale(f, xs1);

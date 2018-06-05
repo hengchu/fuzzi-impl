@@ -13,7 +13,7 @@ import Data.Data
 import Data.Map hiding (foldr)
 import qualified Data.Map as M
 import qualified Data.Set as S
-import qualified Typechecker.Basic   as TB
+import qualified Typechecker.Basic as TB
 import Data.Number.Transfinite
 import Debug.Trace
 
@@ -69,87 +69,73 @@ instance Fractional Sensitivity where
 type Context = Map String Sensitivity
 
 checkExpr :: TB.Context -> Context -> Expr -> Sensitivity
-checkExpr bctxt ctx e =
-  fst $ foldExpr checkVar checkLength checkLit checkBinop
-                 checkIndex checkRupdate checkRaccess
-                 checkArray checkBag checkFloat
-                 checkExp checkClip e
-  where
-    checkVar _ x = (ctx ! x, bctxt ! x)
-
-    checkLength _ (s, t) =
-      case t of
-        LTArray _ ->
-          case s of
-            C _    -> (S 0, LTSmall STInt)
-            S sval -> if isInfinite sval
-                      then (S infinity, LTSmall STInt)
-                      else (S 0,        LTSmall STInt)
-        LTBag   _ -> (s,   LTSmall STInt)
-        _ -> error "Impossible: length() is applied to an expression that's not bag/array"
-
-    checkLit _ lit =
-      let Right tlit = TB.runTcM $ TB.tcExpr bctxt (ELit undefined lit)
-      in case lit of
-           SLit (SILit c) -> (C . fromIntegral $ c, tlit)
-           SLit (SFLit c) -> (C c, tlit)
-           _ -> (S 0, tlit)
-
-    checkBinop _ (sl, tl) op (sr, _) =
-      case op of
-        LT  -> (approx sl sr, LTSmall STBool)
-        LE  -> (approx sl sr, LTSmall STBool)
-        GT  -> (approx sl sr, LTSmall STBool)
-        GE  -> (approx sl sr, LTSmall STBool)
-        AND -> (approx sl sr, LTSmall STBool)
-        OR  -> (approx sl sr, LTSmall STBool)
-        EQ  -> (approx sl sr, LTSmall STBool)
-        NEQ -> (approx sl sr, LTSmall STBool)
-        PLUS -> (sl + sr, tl)
-        MINUS -> (sl + sr, tl)
-        MULT -> (sl * sr, tl)
-        DIV -> (sl / sr, tl)
-
-    checkIndex _ (sarr, tarr) (sidx, _) =
-      case tarr of
-        LTArray t -> (approx sarr sidx, LTSmall t)
-        LTBag   t -> (approx sarr sidx, t)
-        _ -> error "Impossible: index on a non bag/array type"
-
-    checkRupdate _ (srec, trec) _ (svalue, _) =
-      (approx srec svalue, trec)
-
-    checkRaccess _ (srec, trec) label =
-      case trec of
-        LTRow trec' ->
-          (srec, LTSmall $ getRowTypes trec' ! label)
-        _ -> error "Impossible: record access on a non record type"
-
-    checkArray _ sexprs =
-      case typ of
-        LTSmall t -> (sens, LTArray t)
-        LTAny -> (sens, LTArray STAny)
-        _ -> error "Impossible: the basic typechecker should not allow arrays with large types"
-      where (sens, typ) = foldr (\(s, t) (acc, _) -> (s + acc, t)) (0, LTAny) sexprs
-
-    checkFloat _ (s, _) = (s, LTSmall STFloat)
-
-    checkExp _ (s, t) =
-      if s > 0 then (S infinity, t) else (0, t)
-
-    checkBag _ sexprs =
-      case typ of
-        LTAny -> (2 * sens, LTBag LTAny)
-        t     -> (2 * sens, LTBag t)
-      where (sens, typ) =
-              foldr (\(s, t) (acc, _) -> (if s > 0 then (1 + acc, t) else (acc, t)))
-                    (0, LTAny)
-                    sexprs
-
-    checkClip posn (s, _) bound =
-      let s' = checkClipS posn s bound
-          Right t = TB.runTcM $ TB.tcExpr bctxt (ELit undefined bound)
-      in (s', t)
+checkExpr _     ctx (EVar _ x) = ctx ! x
+checkExpr bctxt ctx (ELength _ e) =
+  let s = checkExpr bctxt ctx e in
+  case TB.runTcM $ TB.tcExpr bctxt e of
+    Right (LTArray _ Nothing) ->
+      case s of
+        C _    -> 0
+        S sval -> if isInfinite sval
+                  then S infinity
+                  else S 0
+    Right (LTArray _ (Just _)) ->
+      0
+    Right (LTBag _) -> s
+    _ -> error "Impossible: type error should be caught by basic typechecker"
+checkExpr _ _ (ELit _ lit) =
+  case lit of
+    SLit (SILit c) -> C . fromIntegral $ c
+    SLit (SFLit c) -> C c
+    _ -> 0
+checkExpr bctxt ctx (EBinop _ el op er) =
+  let sl = checkExpr bctxt ctx el
+      sr = checkExpr bctxt ctx er
+  in case op of
+       LT  -> approx sl sr
+       LE  -> approx sl sr
+       GT  -> approx sl sr
+       GE  -> approx sl sr
+       AND -> approx sl sr
+       OR  -> approx sl sr
+       EQ  -> approx sl sr
+       NEQ -> approx sl sr
+       PLUS -> sl + sr
+       MINUS -> sl + sr
+       MULT -> sl * sr
+       DIV -> sl / sr
+checkExpr bctxt ctx (EIndex _ earr eidx) =
+  let sarr = checkExpr bctxt ctx earr
+      sidx = checkExpr bctxt ctx eidx
+  in case TB.runTcM $ TB.tcExpr bctxt earr of
+       Right _ -> approx sarr sidx
+       _ -> error "Impossible: type error should be caught by basic typechecker"
+checkExpr bctxt ctx (ERUpdate _ erow _ eval) =
+  let srec = checkExpr bctxt ctx erow
+      sval = checkExpr bctxt ctx eval
+  in srec + sval
+checkExpr bctxt ctx (ERAccess _ erow _) =
+  checkExpr bctxt ctx erow
+checkExpr bctxt ctx (EArray _ exprs) =
+  foldr (\e acc -> acc + checkExpr bctxt ctx e) 0 exprs
+checkExpr bctxt ctx (EBag _ exprs) =
+  foldr (\e acc -> acc + if checkExpr bctxt ctx e > 0 then 2 else 0) 0 exprs
+checkExpr bctxt ctx (EFloat _ e) =
+  checkExpr bctxt ctx e
+checkExpr bctxt ctx (EExp _ e) =
+  if checkExpr bctxt ctx e > 0
+  then S infinity
+  else 0
+checkExpr bctxt ctx (EClip posn e lit) =
+  checkClipS posn (checkExpr bctxt ctx e) lit
+checkExpr bctxt ctx (EScale _ escalar evec) =
+  let sscalar = checkExpr bctxt ctx escalar
+      svec = checkExpr bctxt ctx evec
+  in sscalar * svec
+checkExpr bctxt ctx (EDot _ evec1 evec2) =
+  approx
+    (checkExpr bctxt ctx evec1)
+    (checkExpr bctxt ctx evec2)
 
 scaleST :: SmallLit -> Sensitivity
 scaleST = \case
@@ -174,7 +160,7 @@ freeVars =
   foldExpr checkVar checkLength checkLit checkBinop
            checkIndex checkRupdate checkRaccess
            checkArray checkBag checkFloat
-           checkExp checkClip
+           checkExp checkClip checkScale checkDot
   where
     checkVar _ x = S.singleton x
     checkLength _ fvs = fvs
@@ -188,6 +174,8 @@ freeVars =
     checkFloat _ s = s
     checkExp _ s = s
     checkClip _ s _ = s
+    checkScale _ s1 s2 = S.union s1 s2
+    checkDot _ s1 s2 = S.union s1 s2
 
 checkToplevelDecl :: Cmd -> Context
 checkToplevelDecl =
@@ -235,7 +223,7 @@ checkCmd' bctxt (CAssign _ (EIndex _ earr eidx) erhs) = \(ctx, mvs) ->
       sidx = checkExpr bctxt ctx eidx
       srhs = checkExpr bctxt ctx erhs
   in case tx of
-       LTArray _ ->
+       LTArray _ _ ->
          if sidx > 0
          then (M.insert x (S infinity) ctx, mvs', 0)
          else (M.adjust (+ srhs) x ctx, mvs', 0)
@@ -254,7 +242,7 @@ checkCmd' bctxt (CAssign _ (ELength _ lhs) rhs) = \(ctx, mvs) ->
       mv = indexedVar lhs
       tmv = bctxt ! mv
   in case (maybeX, tmv) of
-       (_, LTArray _) ->
+       (_, LTArray _ Nothing) ->
          if srhs > 0
          then (M.insert mv (S infinity) ctx, S.insert mv mvs, 0)
          else (ctx, S.insert mv mvs, 0)

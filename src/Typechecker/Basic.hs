@@ -1,5 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE ViewPatterns #-}
 
 module Typechecker.Basic where
 
@@ -38,6 +39,7 @@ tcExpr :: Context -> Expr -> TcM LargeType
 tcExpr ctx = foldExprM tcVar tcLength tcLit tcBinop tcIndex
                        tcRupdate tcRaccess tcArray
                        tcBag tcFloat tcExp tcClip
+                       tcScale tcDot
   where tcVar posn = \var ->
           case M.lookup var ctx of
             Nothing -> tcError posn $ "Unknown variable: " ++ var
@@ -101,7 +103,7 @@ tcExpr ctx = foldExprM tcVar tcLength tcLit tcBinop tcIndex
 
         tcIndex posn = \tarr tidx -> do
           case (tarr, tidx) of
-            (LTArray t, LTSmall STInt) -> return . LTSmall $ t
+            (LTArray t _, LTSmall STInt) -> return . LTSmall $ t
             (LTBag t, LTSmall STInt) -> return t
             (_, LTSmall STInt) -> tcError posn "Indexing can only be applied to arrays or bags"
             (_, _) -> tcError posn "Index must be an integer"
@@ -138,7 +140,7 @@ tcExpr ctx = foldExprM tcVar tcLength tcLit tcBinop tcIndex
                          )
                          STAny
                          lts
-          return $ LTArray contentLt
+          return $ LTArray contentLt (Just $ length lts)
 
         tcBag posn = \lts -> do
           contentLt <- foldrM
@@ -163,11 +165,60 @@ tcExpr ctx = foldExprM tcVar tcLength tcLit tcBinop tcIndex
 
         tcClip posn = \tv lit -> do
           tlit <- tcExpr ctx (ELit posn lit)
-          when (tv /= tlit) $
-            tcError posn $ clipTcError
-          when (not $ isNumericLT tv) $
-            tcError posn "Clip can only be applied to numeric types"
+          case tlit of
+            LTSmall st -> do
+              when (not $ isNumericST st) $
+                tcError posn "clip() 2nd argument must be numeric type"
+            _ ->
+              tcError posn "clip() 2nd argument must be a scalar type"
+          case tv of
+            LTSmall st -> do
+              when (tv /= tlit) $
+                tcError posn "clip() type mismatch"
+              when (not $ isNumericST st) $
+                tcError posn "clip() 1st argument must be numeric type"
+            LTArray st _ -> do
+              when (not $ isNumericST st) $
+                tcError posn "clip() 1st argument must be numeric type"
+              when (LTSmall st /= tlit) $
+                tcError posn clipTcError
+            _ -> tcError posn "clip() 1st argument must be numeric type"
           return tv
+
+        tcScale posn = \tscalar tvec -> do
+          case tscalar of
+            LTSmall st -> do
+              when (not $ isNumericST st) $
+                tcError posn scaleError
+            _ ->
+              tcError posn "scale()'s 1st argument must be a scalar type"
+          case tvec of
+            LTArray st _ -> do
+              when (tscalar /= LTSmall st) $
+                tcError posn scaleError
+            LTRow (M.toList . getRowTypes -> rtypes) ->
+              when (any (\(_, st) -> tscalar /= LTSmall st) rtypes) $
+                tcError posn scaleError
+            _ -> tcError posn scaleError
+
+          return tvec
+
+        tcDot posn = \tlhs trhs -> do
+          when (tlhs /= trhs) $ do
+            tcError posn "dot() must be applied to two expressions of the same type"
+
+          case tlhs of
+            LTArray st _ -> do
+              when (not $ isNumericST st) $ do
+                tcError posn dotError
+              return . LTSmall $ st
+            LTRow (M.toList . getRowTypes -> rtypes) -> do
+              when (any (\(_, st) -> not $ isNumericST st) rtypes) $
+                tcError posn dotError
+              return . LTSmall . snd . head $ rtypes
+            _ ->
+              tcError posn dotError
+
 
 tcCmdTopLevelDecls :: Cmd -> TcM Context
 tcCmdTopLevelDecls = foldCmdM tcCassign
@@ -227,20 +278,33 @@ tcCmd' ctx c =
     stCompat _  STAny = True
     stCompat t1 t2    = t1 == t2
 
-    ltCompat LTAny _                   = True
-    ltCompat _ LTAny                   = True
-    ltCompat (LTBag t1)   (LTBag t2)   = ltCompat t1 t2
-    ltCompat (LTArray t1) (LTArray t2) = stCompat t1 t2
-    ltCompat (LTSmall t1) (LTSmall t2) = stCompat t1 t2
+    ltCompat LTAny _                                   = True
+    ltCompat _ LTAny                                   = True
+    ltCompat (LTBag t1)     (LTBag t2)                 = ltCompat t1 t2
+    ltCompat (LTArray t1 Nothing) (LTArray t2 Nothing) = stCompat t1 t2
+    ltCompat (LTArray t1 (Just len1)) (LTArray t2 (Just len2)) = stCompat t1 t2 && len1 == len2
+    ltCompat (LTSmall t1)   (LTSmall t2)               = stCompat t1 t2
     ltCompat t1 t2 = t1 == t2
 
-    tcCassign posn x e = do
-      when (not $ isValidLhsExpr x) $
-        tcError posn $ invalidLhsExprError x
-      t <- tcExpr ctx x
+    tcCassign posn lhs e = do
+      case lhs of
+        ELength _ arr -> do
+          t <- tcExpr ctx arr
+          case t of
+            LTArray _ (Just _) ->
+              tcError posn "Cannot change the length of a fixed length array"
+            _ -> return ()
+          tcAssignCompat posn lhs e
+        _ ->
+          tcAssignCompat posn lhs e
+
+    tcAssignCompat posn lhs e = do
+      when (not $ isValidLhsExpr lhs) $
+        tcError posn $ invalidLhsExprError lhs
+      t <- tcExpr ctx lhs
       te <- tcExpr ctx e
       when (not $ ltCompat t te) $
-        tcError posn $ assignTcError x e
+        tcError posn $ assignTcError lhs e
 
     tcClaplace posn x _ rhs = tcCassign posn (EVar posn x) rhs
 
@@ -326,3 +390,11 @@ lengthUpdateLhsTcError =
 invalidLhsExprError :: Expr -> Error
 invalidLhsExprError lhs =
   "The LHS of assignment is invalid: " ++ show lhs
+
+scaleError :: Error
+scaleError =
+  "scale must be applied to a scalor and an array/record of the same numeric type"
+
+dotError :: Error
+dotError =
+  "dot() must be applied to array/record of numeric types"

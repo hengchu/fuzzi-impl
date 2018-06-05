@@ -57,6 +57,8 @@ import Prelude hiding (LT, GT, EQ)
   length    { TLength _ }
   exp       { TExp _ }
   clip      { TClip _ }
+  scale     { TScale _ }
+  dot       { TDotP _ }
 
 %right ';'
 %left '.'
@@ -128,10 +130,11 @@ LabelTypePairs
   | LabelTypePair ',' LabelTypePairs { $1 : $3 }
 
 LargeType
-  : SmallType              { LTSmall $1 }
-  | '{' LabelTypePairs '}' { LTRow . RowType . fromList $ $2 }
-  | '[' SmallType ']'      { LTArray  $2 }
-  | '{' LargeType '}'      { LTBag $2 }
+  : SmallType                     { LTSmall $1 }
+  | '{' LabelTypePairs '}'        { LTRow . RowType . fromList $ $2 }
+  | '[' SmallType ']'             { LTArray  $2 Nothing }
+  | '[' SmallType ']' '(' int ')' { LTArray $2 (Just $ getInt $5) }
+  | '{' LargeType '}'             { LTBag $2 }
 
 Expr
   : Literal                                  { ELit (snd $1) (fst $1) }
@@ -161,6 +164,8 @@ Expr
                                              }
   | exp '(' Expr ')'                         { EExp (token2Position $1) $3 }
   | clip '(' Expr ',' Literal ')'            { EClip (token2Position $1) $3 (fst $5) }
+  | scale '(' Expr ',' Expr ')'              { EScale (token2Position $1) $3 $5 }
+  | dot '(' Expr ',' Expr ')'                { EDot (token2Position $1) $3 $5 }
 
 SmallLiteral
   : int   { (SILit (getInt $1), token2Position $1) }

@@ -40,7 +40,7 @@ prettyExpr e =
   foldExpr prettyVar prettyLen prettyLit prettyBinop
            prettyIndex prettyUpdate prettyAccess
            prettyArray prettyBag prettyFloat
-           prettyExp prettyClip
+           prettyExp prettyClip prettyScale prettyDot
            e
 
   where prettyVar _ x = \_ -> text x
@@ -92,7 +92,16 @@ prettyExpr e =
         prettyExp _ pexpr = \_ -> text "exp" <> lparen <> pexpr 0 <> rparen
 
         prettyClip posn pv lit = \_ ->
-          text "clip" <> lparen <> pv 0 <> comma <+> prettyLit posn lit (0 :: Int) <> rparen
+          text "clip" <> lparen <> pv 0 <> comma
+                      <+> prettyLit posn lit (0 :: Int) <> rparen
+
+        prettyScale _ pe1 pe2 = \_ ->
+          text "scale" <> lparen <> pe1 0 <> comma
+                       <+> pe2 0 <> rparen
+
+        prettyDot _ pe1 pe2 = \_ ->
+          text "dot" <> lparen <> pe1 0 <> comma
+                     <+> pe2 0 <> rparen
 
 prettyCmd :: Cmd -> Doc
 prettyCmd =
@@ -136,7 +145,10 @@ prettyCmd =
     prettyLT = \case
       LTSmall st -> prettyST st
       LTRow (getRowTypes -> rt) -> lbrace <+> prettyRT rt <+> rbrace
-      LTArray st -> lbrack <> prettyST st <> rbrack
+      LTArray st maybeLen ->
+        case maybeLen of
+          Just len -> lbrack <> prettyST st <> rbrack <> lparen <> int len <> rparen
+          Nothing -> lbrack <> prettyST st <> rbrack
       LTBag lt -> lbrace <> prettyLT lt <> rbrace
       LTAny -> text "any"
 

@@ -11,7 +11,7 @@ newtype RowType = RowType { getRowTypes :: Map String SmallType }
 
 data LargeType = LTSmall SmallType
                | LTRow   RowType
-               | LTArray SmallType
+               | LTArray SmallType (Maybe Int) -- ^ Arrays may have a fixed length.
                | LTBag   LargeType
                | LTAny
   deriving (Show, Eq)
@@ -51,6 +51,12 @@ data Expr = EVar     Position String
           | EClip    Position
                      Expr     -- ^Expression to be clipped
                      Literal  -- ^The bound
+          | EScale   Position
+                     Expr     -- ^Scalar
+                     Expr     -- ^Vector
+          | EDot     Position
+                     Expr     -- ^Vector
+                     Expr     -- ^Vector
   deriving (Show, Eq)
 
 exprPosn :: Expr -> Position
@@ -66,6 +72,8 @@ exprPosn (EBag     p _) = p
 exprPosn (EFloat   p _) = p
 exprPosn (EExp     p _) = p
 exprPosn (EClip    p _ _) = p
+exprPosn (EScale   p _ _) = p
+exprPosn (EDot     p _ _) = p
 
 data Cmd = CAssign  Position Expr Expr
          | CLaplace Position String Float Expr
@@ -240,9 +248,11 @@ foldExpr :: (Position -> String -> a)
          -> (Position -> a -> a)
          -> (Position -> a -> a)
          -> (Position -> a -> Literal -> a)
+         -> (Position -> a -> a -> a)
+         -> (Position -> a -> a -> a)
          -> Expr
          -> a
-foldExpr fvar flength flit fbinop findex frupdate fraccess farray fbag ffloat fexp fclip e =
+foldExpr fvar flength flit fbinop findex frupdate fraccess farray fbag ffloat fexp fclip fscale fdot e =
   case e of
     EVar posn str -> fvar posn str
     ELength posn expr -> flength posn (recur expr)
@@ -256,8 +266,10 @@ foldExpr fvar flength flit fbinop findex frupdate fraccess farray fbag ffloat fe
     EFloat posn expr -> ffloat posn (recur expr)
     EExp posn expr -> fexp posn (recur expr)
     EClip posn ev bound -> fclip posn (recur ev) bound
+    EScale posn escalar evec -> fscale posn (recur escalar) (recur evec)
+    EDot posn evec1 evec2 -> fdot posn (recur evec1) (recur evec2)
   where recur = foldExpr fvar flength flit fbinop findex frupdate
-                         fraccess farray fbag ffloat fexp fclip
+                         fraccess farray fbag ffloat fexp fclip fscale fdot
 
 foldExprA :: (Applicative f)
           => (Position -> String -> f a)
@@ -272,9 +284,11 @@ foldExprA :: (Applicative f)
           -> (Position -> f a -> f a)
           -> (Position -> f a -> f a)
           -> (Position -> f a -> Literal -> f a)
+          -> (Position -> f a -> f a -> f a)
+          -> (Position -> f a -> f a -> f a)
           -> Expr
           -> f a
-foldExprA fvar flength flit fbinop findex frupdate fraccess farray fbag ffloat fexp fclip e =
+foldExprA fvar flength flit fbinop findex frupdate fraccess farray fbag ffloat fexp fclip fscale fdot e =
   case e of
     EVar posn str -> fvar posn str
     ELength posn expr -> flength posn (recur expr)
@@ -297,10 +311,14 @@ foldExprA fvar flength flit fbinop findex frupdate fraccess farray fbag ffloat f
       fexp posn (recur expr)
     EClip posn ev bound ->
       fclip posn (recur ev) bound
+    EScale posn escalar evec ->
+      fscale posn (recur escalar) (recur evec)
+    EDot posn evec1 evec2 ->
+      fdot posn (recur evec1) (recur evec2)
   where
     recur = foldExprA fvar flength flit fbinop findex
                       frupdate fraccess farray fbag
-                      ffloat fexp fclip
+                      ffloat fexp fclip fscale fdot
 
 foldExprM :: (Monad m)
           => (Position -> String -> m a)
@@ -315,11 +333,14 @@ foldExprM :: (Monad m)
           -> (Position -> a -> m a)
           -> (Position -> a -> m a)
           -> (Position -> a -> Literal -> m a)
+          -> (Position -> a -> a -> m a)
+          -> (Position -> a -> a -> m a)
           -> Expr
           -> m a
 foldExprM fvar flength flit fbinop
           findex frupdate fraccess
-          farray fbag ffloat fexp fclip e =
+          farray fbag ffloat fexp fclip
+          fscale fdot e =
   case e of
     EVar posn str -> fvar posn str
     ELength posn expr -> recur expr >>= flength posn
@@ -352,9 +373,17 @@ foldExprM fvar flength flit fbinop
     EClip posn ev bound -> do
       acc <- recur ev
       fclip posn acc bound
+    EScale posn escalar evec -> do
+      scalar <- recur escalar
+      vec <- recur evec
+      fscale posn scalar vec
+    EDot posn evec1 evec2 -> do
+      vec1 <- recur evec1
+      vec2 <- recur evec2
+      fdot posn vec1 vec2
   where recur = foldExprM fvar flength flit fbinop findex
                           frupdate fraccess farray fbag
-                          ffloat fexp fclip
+                          ffloat fexp fclip fscale fdot
 
 foldCmd :: (Position -> Expr -> Expr -> a)
         -> (Position -> String -> Float -> Expr -> a)

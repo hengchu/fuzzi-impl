@@ -53,7 +53,7 @@ library
       , Pretty
       , Interp
       , Typechecker.Basic
-      , Typechecker.InfFlow
+      -- , Typechecker.InfFlow
       , Typechecker.Sensitivity
   build-tools:
       alex, happy

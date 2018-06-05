@@ -149,10 +149,34 @@ interpExpr (EFloat posn e) m =
 interpExpr (EClip posn e lit) m =
   clip (interpExpr e m) (interpLiteral lit)
   where
-    clip (VInt i)   (VInt b)   = VInt   $ if abs i <= abs b then i else signum i * abs b
-    clip (VFloat f) (VFloat b) = VFloat $ if abs f <= abs b then f else signum f * abs b
-    clip (VRec r)   (VRec b)   = VRec   $ M.unionWith clip r b
-    clip _          _          = throw . MkException posn $ FuzziTypeError
+    clip (VInt i)      (VInt b)   = VInt   $ if abs i <= abs b then i else signum i * abs b
+    clip (VFloat f)    (VFloat b) = VFloat $ if abs f <= abs b then f else signum f * abs b
+    clip (VRec r)      b          = VRec   $ M.map (flip clip b) r
+    clip (VArr len vs) b          = VArr len $ fmap (flip clip b) vs
+    clip _          _             = throw . MkException posn $ FuzziTypeError
+interpExpr (EScale posn escalar evec) m =
+  let scalar = interpExpr escalar m
+      vec    = interpExpr evec m
+  in interpScale scalar vec
+  where
+    interpScale (VInt sc)   (VInt v)      = VInt $ sc * v
+    interpScale (VFloat sc) (VFloat v)    = VFloat $ sc * v
+    interpScale sc          (VArr len vs) = VArr len $ fmap (interpScale sc) vs
+    interpScale sc          (VRec vs)     = VRec $ M.map (interpScale sc) vs
+    interpScale _           _             = throw . MkException posn $ FuzziTypeError
+interpExpr (EDot posn evec1 evec2) m =
+  let vec1 = interpExpr evec1 m
+      vec2 = interpExpr evec2 m
+  in interpDot vec1 vec2
+  where
+    interpDot (VInt v1)   (VInt v2)           = VInt (v1 * v2)
+    interpDot (VFloat v1) (VFloat v2)         = VFloat (v1 * v2)
+    interpDot (VArr len1 vs1) (VArr len2 vs2) =
+      if len1 == 0 || len2 == 0 || len1 /= len2
+      then throw . MkException posn $ FuzziIndexOutOfBound
+      else let prods = zipWith interpDot vs1 vs2
+           in foldr1 (\prod acc -> interpOp posn PLUS prod acc) prods
+    interpDot _ _ = throw . MkException posn $ FuzziTypeError
 
 safeListIndex :: [a] -> Int -> Maybe a
 safeListIndex []     _ = Nothing

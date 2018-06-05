@@ -50,6 +50,8 @@ $eol                          ;
 "lap"                         { \p _ -> TLaplace p }
 "length"                      { \p _ -> TLength p }
 "clip"                        { \p _ -> TClip p }
+"scale"                       { \p _ -> TScale p }
+"dot"                         { \p _ -> TDotP p }
 "true"                        { \p _ -> TTrue p }
 "false"                       { \p _ -> TFalse p }
 "if"                          { \p _ -> TIf p }
@@ -109,6 +111,8 @@ data Token = TIdent     AlexPosn String
            | TLength    AlexPosn
            | TExp       AlexPosn
            | TClip      AlexPosn
+           | TScale     AlexPosn
+           | TDotP      AlexPosn
   deriving (Show, Eq)
 
 getAlexPosn :: Token -> AlexPosn
@@ -156,4 +160,6 @@ getAlexPosn (TPartition p) = p
 getAlexPosn (TLength    p) = p
 getAlexPosn (TExp       p) = p
 getAlexPosn (TClip      p) = p
+getAlexPosn (TScale     p) = p
+getAlexPosn (TDotP      p) = p
 }
