@@ -1,45 +1,79 @@
-db:[1.0]     { { x1: float, x2: float, y: float } };
-db1:    { {one: float, x1: float, x2: float, y: float } };
+db:[1.0]     { [float](3) };
+db1:    { [float](4) };
 
-w:      { b: float, w1: float, w2: float };
-dws:    { {b: float, w1: float, w2: float} };
-temp:   {b: float, w1: float, w2: float};
-t:      float;
+w:      [float](3);
+dws:    { [float](3) };
 
-gbias:  float;
-gw1:    float;
-gw2:    float;
 i:      int;
 
-trow:   {  x1: float, x2: float, y: float };
-trow1:  { one: float, x1: float, x2: float, y: float };
+trow:   [float](3);
+trow1:  [float](4);
 
-bmap(db, db1, trow, i , trow1, {
-  trow1 = { one = 1.0, x1 = 0.0, x2 = 0.0, y = 0.0 };
-  trow1 = trow1 { x1 = trow.x1 };
-  trow1 = trow1 { x2 = trow.x2 };
-  trow1 = trow1 { y = trow.y };
-});
-
-wout: { b : float, w1 : float, w2 : float };
+wout: [float](3);
 prob: float;
-dot: float;
-scale: float;
+dt: float;
+sc: float;
+
+tw : [float](3);
+tf_out : float;
+dws_bias : { float };
+dws_one : { float };
+dws_two : { float };
+
+tsum : float;
+bias_sum : float;
+one_sum : float;
+two_sum : float;
+
+repeat 100 {
+
+bmap(db, db1, trow, i, trow1, {
+  trow1 = [1.0, 0.0, 0.0, 0.0];
+  trow1[1] = trow[0];
+  trow1[2] = trow[1];
+  trow1[3] = trow[2];
+});
 
 bmap(db1, dws, trow1, i, wout, {
-  wout = { b = 0.0, w1 = 0.0, w2 = 0.0 };
-  wout = wout { b = trow1.one };
-  wout = wout { w1 = trow1.x1 };
-  wout = wout { w2 = trow1.x2 };
+  wout = [trow1[0], trow1[1], trow1[2]];
 
-  dot = (trow1.one) * (w.b) + (trow1.x1) * (w.w1) + (trow1.x2) * (w.w2);
-  prob = 1.0 / (1.0 + exp((0.0-1.0) * (trow1.y) * dot));
-  scale = (1.0 - prob) * (trow1.y);
-  wout = wout { b = (wout.b) * scale };
-  wout = wout { b = (wout.w1) * scale };
-  wout = wout { b = (wout.w2) * scale };
+  dt = dot(wout, w);
+  prob = 1.0 / (1.0 + exp((0.0-1.0) * (trow1[3]) * dt));
+  sc = (1.0 - prob) * (trow1[3]);
+  wout = scale(sc, wout);
 
-  dot = 0.0;
+  dt = 0.0;
   prob = 0.0;
-  scale = 0.0;
+  sc = 0.0;
 });
+
+bmap(dws, dws_bias, tw, i, tf_out, { tf_out = tw[0]; });
+bmap(dws, dws_one,  tw, i, tf_out, { tf_out = tw[1]; });
+bmap(dws, dws_two,  tw, i, tf_out, { tf_out = tw[2]; });
+
+tsum = 0.0;
+bsum(dws_bias, bias_sum, tsum, i, 2.0);
+
+tsum = 0.0;
+bsum(dws_one, one_sum, tsum, i, 2.0);
+
+tsum = 0.0;
+bsum(dws_two, two_sum, tsum, i, 2.0);
+
+bias_sum $= lap(1.0, bias_sum);
+one_sum  $= lap(1.0, one_sum);
+two_sum  $= lap(1.0, two_sum);
+
+w[0] = bias_sum;
+w[1] = one_sum;
+w[2] = two_sum;
+
+i = 0;
+tf_out = 0.0;
+trow = [0.0, 0.0, 0.0];
+trow1 = [0.0, 0.0, 0.0, 0.0];
+tsum = 0.0;
+tw = [0.0, 0.0, 0.0];
+wout = [0.0, 0.0, 0.0];
+
+}
