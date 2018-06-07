@@ -15,6 +15,7 @@ import qualified Data.Vector as V
 import qualified Data.Aeson as J
 import qualified Data.HashMap.Strict as HM
 import System.IO.Unsafe
+import Data.Attoparsec.Number
 
 type Label = String
 type Var   = String
@@ -294,12 +295,12 @@ interp c = throw . MkException (cmdPosn c) $ FuzziUndesugaredMacro
 
 instance J.FromJSON Value where
   parseJSON v = pNum <|> pBool <|> pRec <|> pArr
-    where pNum = J.withScientific
+    where pNum = J.withNumber
                    "Number"
                    (\num ->
-                      case floatingOrInteger num of
-                        Right i -> pure . VInt $ i
-                        Left f -> pure . VFloat $ f)
+                      case num of
+                        I i -> pure . VInt . fromIntegral $ i
+                        D f -> pure . VFloat . realToFrac $ f)
                    v
 
           pBool = J.withBool
