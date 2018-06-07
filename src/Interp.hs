@@ -1,4 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE BangPatterns #-}
 
 module Interp where
 
@@ -6,8 +7,8 @@ import Control.Applicative
 import Control.Exception hiding (try)
 import Data.Scientific
 import Data.Text (unpack, pack)
-import Data.Map
-import Data.Map as M
+import Data.Map.Strict
+import Data.Map.Strict as M
 import Data.Foldable
 import Prelude hiding (LT, GT, EQ)
 import Syntax
@@ -280,9 +281,9 @@ interpLhsExpr (ELength posn e) =
 interpLhsExpr e = throw . MkException (exprPosn e) $ FuzziTypeError
 
 interp :: Cmd -> Memory -> Memory
-interp (CAssign _ x e) = \m -> interpLhsExpr x (interpExpr e m) m
-interp (CLaplace _ x _ e) = \m -> M.insert x (interpExpr e m) m
-interp (CIf posn e ct cf) = \m ->
+interp (CAssign _ x e) = \(!m) -> interpLhsExpr x (interpExpr e m) m
+interp (CLaplace _ x _ e) = \(!m) -> M.insert x (interpExpr e m) m
+interp (CIf posn e ct cf) = \(!m) ->
   case interpExpr e m of
     VBool b -> if b then interp ct m else interp cf m
     _ -> throw . MkException posn $ FuzziTypeError
