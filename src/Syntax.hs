@@ -149,6 +149,23 @@ desugar c =
     CRepeat posn iters cmd -> desugarRepeat posn iters (desugar cmd)
     _ -> c
 
+desugarAll :: Cmd -> Cmd
+desugarAll c =
+  case c of
+    CBMap posn invar outvar tvar ivar outtemp cmd
+      -> desugarBMap posn invar outvar tvar ivar outtemp (desugarAll cmd)
+    CAMap posn invar outvar tvar ivar outtemp cmd
+      -> desugarAMap posn invar outvar tvar ivar outtemp (desugarAll cmd)
+    CBSum  posn invar outvar tvar ivar bound
+      -> desugarBSum posn invar outvar tvar ivar bound
+    CPartition posn invar outvar tvar ivar outindex npart cmd
+      -> desugarPartition posn invar outvar tvar ivar outindex npart (desugarAll cmd)
+    CWhile posn e cmd -> CWhile posn e (desugar cmd)
+    CSeq posn c1 c2 -> CSeq posn (desugarAll c1) (desugarAll c2)
+    CIf posn e ct cf -> CIf posn e (desugarAll ct) (desugarAll cf)
+    CRepeat posn iters cmd -> desugarRepeat posn iters (desugarAll cmd)
+    _ -> c
+
 intLit :: Position -> Int -> Expr
 intLit posn = ELit posn . SLit . SILit
 

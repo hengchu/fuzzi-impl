@@ -44,7 +44,7 @@ main = runCommand $ \opts _ -> do
   let ast = parseProg . alexScanTokens $ progText
 
   when (optPretty opts) $ do
-    putStr . render . prettyCmd . desugar $ ast
+    putStr . render . prettyCmd . desugarAll $ ast
     exitWith ExitSuccess
 
   when (optTypecheck opts && length (optInterp opts) == 0) $ do
