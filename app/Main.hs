@@ -62,5 +62,5 @@ main = runCommand $ \opts _ -> do
     case eitherDecodeStrict fileContent of
       Left err  -> putStrLn err
       Right mem -> do
-        let mem' = interp (desugar ast) (getJsonMemory mem)
+        let mem' = interp (desugarAll ast) (getJsonMemory mem)
         BSL.putStrLn . encode . JsonMemory $ mem'

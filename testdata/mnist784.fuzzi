@@ -1,0 +1,90 @@
+db:[1.0]     { [float](785) };
+db1:    { [float](786) };
+
+partitions:     { int };
+
+
+w:      [float](785);
+dws:    { [float](785) };
+
+w_total: { [float](785)};
+
+
+i:    int;
+j:    int;
+
+trow:   [float](785);
+trow1:  [float](786);
+
+wout: [float](785);
+prob: float;
+dt: float;
+sc: float;
+
+tw : [float](785);
+tf_out : float;
+dws_j: { float };
+dws_bias : { float };
+dws_one : { float };
+dws_two : { float };
+
+tsum : float;
+bias_sum : float;
+one_sum : float;
+two_sum : float;
+j_sum: float;
+temp: float;
+size: float;
+
+repeat 10 {
+
+bmap(db, db1, trow, i, trow1, {
+  j = 0;
+  trow1[0] = 1.0;
+  repeat 785 {
+    trow1[j+1] = trow[j];
+    j = j + 1;
+  }
+});
+
+bmap(db1, dws, trow1, i, wout, {
+  j = 0;
+  repeat 785 {
+    wout[j] = trow1[j];
+    j = j + 1;
+  };
+
+  dt = dot(wout, w) / 1000.0;
+  temp = clip(exp((0.0-1.0) * (trow1[785]) * dt), 10000.0);
+  prob = 1.0 / (1.0 + temp);
+  sc = (1.0 - prob) * (trow1[785]);
+  wout = scale(sc, wout);
+
+  dt = 0.0;
+  temp = 0.0;
+  prob = 0.0;
+  sc = 0.0;
+});
+
+j = 0;
+
+size $= lap(1.0, float(length(db)));
+
+repeat 785 {
+  bmap(dws, dws_j, tw, i, tf_out, { tf_out = tw[j]; });
+
+  j_sum = 0.0;
+  tsum = 0.0;
+  bsum(dws_j, j_sum, tsum, i, 2.0);
+
+  j_sum $= lap(1.0, j_sum);
+
+  w[j] = j_sum / size;
+  j = j + 1;
+};
+
+i = 0;
+tf_out = 0.0;
+tsum = 0.0;
+
+}

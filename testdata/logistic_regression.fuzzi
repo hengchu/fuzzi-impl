@@ -25,7 +25,7 @@ bias_sum : float;
 one_sum : float;
 two_sum : float;
 
-repeat 100 {
+repeat 1 {
 
 bmap(db, db1, trow, i, trow1, {
   trow1 = [1.0, 0.0, 0.0, 0.0];
