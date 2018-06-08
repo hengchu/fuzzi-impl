@@ -1,0 +1,5 @@
+python-mnist
+scipy
+numpy
+Pillow >= 5.0
+matplotlib
