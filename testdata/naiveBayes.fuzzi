@@ -1,0 +1,42 @@
+#NEED TO MAKE EVERYTHING BOOLEAN?
+
+db:[1.0]     { [float](58) };
+
+theta_plus: { float };
+theta_minus: { float };
+
+p_plus: float;
+p_minus: float;
+
+m_plus: float;
+m_minus: float;
+
+i: int;
+t: [float](58);
+
+lab = float;
+
+# pull all the labels
+bmap(db, db_j, t, i, lab, { 
+  if db[58] == 1{
+    lab = 1;
+  } else {
+    lab = 0;
+  }
+});
+
+#sum them
+j_sum = 0.0;
+tsum = 0.0;
+bsum(db_j, j_sum, tsum, i, 1.0);
+bmap(db, dws, theta_plus, i, wout, {
+});
+
+#p_plus = 1/(total_num_plusses)
+#p_minus = 1 - p_plus
+
+#p(x_j | y = +1) for each feature j
+#theta_plus_j = gaussian for continuous? Or simple binary (num_ocurrences_of_plus over all i / total_num_plusses)
+
+#w = ln (theta_plus/theta_minus) - ln((1 -theta_plus)/(1 - theta_minus)) for each j
+# b = sum from j = 1..d(58) ln((1 -theta_plus)/(1 - theta_minus)) - ln(p_minus/p_plus)
