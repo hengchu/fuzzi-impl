@@ -10,6 +10,7 @@ import Parser
 import Pretty
 import Syntax
 import Interp
+import Python
 import System.Exit
 import Text.PrettyPrint
 import Typechecker.Sensitivity
@@ -22,18 +23,21 @@ data CLIOptions = CLIOptions {
   , optTypecheck :: Bool
   , optPretty :: Bool
   , optInterp :: String
+  , optTranspile :: Bool
   }
 
 instance Options CLIOptions where
   defineOptions = CLIOptions
     <$> simpleOption "file" "stdin"
                      "The input file"
-    <*> simpleOption "tc" True
-                     "Run typechecker?"
+    <*> simpleOption "tc" False
+                     "Run sensitivity checker only?"
     <*> simpleOption "pretty" False
                      "Pretty print instead?"
     <*> simpleOption "interp" ""
                      "Run the interpreter instead?"
+    <*> simpleOption "transpile" True
+                     "Transpile to python"
 
 main :: IO ()
 main = runCommand $ \opts _ -> do
@@ -42,6 +46,10 @@ main = runCommand $ \opts _ -> do
                 then hGetContents stdin
                 else readFile file
   let ast = parseProg . alexScanTokens $ progText
+
+  when (optTranspile opts) $ do
+    putStr $ transpile undefined (desugarAll ast)
+    exitWith ExitSuccess
 
   when (optPretty opts) $ do
     putStr . render . prettyCmd . desugarAll $ ast

@@ -52,6 +52,7 @@ library
       , Parser
       , Pretty
       , Interp
+      , Python
       , Typechecker.Basic
       -- , Typechecker.InfFlow
       , Typechecker.Sensitivity
