@@ -13,6 +13,7 @@ import Interp
 import Python
 import System.Exit
 import Text.PrettyPrint
+import qualified Typechecker.Basic as TB
 import Typechecker.Sensitivity
 import Data.Aeson (eitherDecodeStrict, encode)
 import qualified Data.ByteString as BS
@@ -36,8 +37,15 @@ instance Options CLIOptions where
                      "Pretty print instead?"
     <*> simpleOption "interp" ""
                      "Run the interpreter instead?"
-    <*> simpleOption "transpile" True
+    <*> simpleOption "transpile" False
                      "Transpile to python"
+
+parseJsonMemory :: String -> IO JsonMemory
+parseJsonMemory path = do
+  fileContent <- BS.readFile path
+  case eitherDecodeStrict fileContent of
+    Left err  -> putStrLn err >> exitWith (ExitFailure (-2))
+    Right mem -> return mem
 
 main :: IO ()
 main = runCommand $ \opts _ -> do
@@ -46,29 +54,39 @@ main = runCommand $ \opts _ -> do
                 then hGetContents stdin
                 else readFile file
   let ast = parseProg . alexScanTokens $ progText
+  let tcResult = TB.runTcM $ TB.tcCmd ast
 
-  when (optTranspile opts) $ do
-    putStr $ transpile undefined (desugarAll ast)
-    exitWith ExitSuccess
+  case tcResult of
+    Left errors -> forM_ errors putStrLn >> exitWith (ExitFailure (-1))
+    Right basicTypeContext -> do
+      when (optTranspile opts) $ do
+        when ((length $ optInterp opts) == 0) $ do
+          putStrLn "Please specify --interp"
+          exitWith (ExitFailure (-2))
 
-  when (optPretty opts) $ do
-    putStr . render . prettyCmd . desugarAll $ ast
-    exitWith ExitSuccess
+        mem <- parseJsonMemory (optInterp opts)
+        putStr $ transpile
+                   basicTypeContext
+                   (M.keys $ getJsonMemory mem)
+                   (optInterp opts)
+                   ast
+        exitWith ExitSuccess
 
-  when (optTypecheck opts && length (optInterp opts) == 0) $ do
-    let result = checkCmd ast
-    case result of
-      Left  errs      -> forM_ errs putStrLn
-      Right (ctx, ep) -> do
-        putStrLn $ "Epsilon = " ++ show ep
-        forM_ (M.toList ctx) $ \(x, s) -> do
-          putStrLn $ x ++ " : " ++ show s
-    exitWith ExitSuccess
+      when (optPretty opts) $ do
+        putStr . render . prettyCmd . desugarAll $ ast
+        exitWith ExitSuccess
 
-  when ((length $ optInterp opts) > 0) $ do
-    fileContent <- BS.readFile (optInterp opts)
-    case eitherDecodeStrict fileContent of
-      Left err  -> putStrLn err
-      Right mem -> do
+      when (optTypecheck opts && length (optInterp opts) == 0) $ do
+        let result = checkCmd ast
+        case result of
+          Left  errs      -> forM_ errs putStrLn
+          Right (ctx, ep) -> do
+            putStrLn $ "Epsilon = " ++ show ep
+            forM_ (M.toList ctx) $ \(x, s) -> do
+              putStrLn $ x ++ " : " ++ show s
+        exitWith ExitSuccess
+
+      when ((length $ optInterp opts) > 0) $ do
+        mem <- parseJsonMemory (optInterp opts)
         let mem' = interp (desugarAll ast) (getJsonMemory mem)
         BSL.putStrLn . encode . JsonMemory $ mem'

@@ -73,10 +73,7 @@ transExpr (EArray _ exprs) _ =
   <> lbrack <> foldr (\e doc -> transExpr e 0 <> comma <+> doc) empty exprs <> rbrack
   <> rparen
 transExpr (EBag _ exprs) _ =
-  text "np.array"
-  <> lparen
-  <> lbrack <> foldr (\e doc -> transExpr e 0 <> comma <+> doc) empty exprs <> rbrack
-  <> rparen
+  lbrack <> foldr (\e doc -> transExpr e 0 <> comma <+> doc) empty exprs <> rbrack
 transExpr (EFloat _ e) _ =
   text "float" <> lparen <> transExpr e 0 <> rparen
 transExpr (EClip _ e bounds) _ =
@@ -116,26 +113,30 @@ initFromLargeType (LTArray _ Nothing) =
   text "np.array" <> lparen <> lbrack <> rbrack <> rparen
 initFromLargeType (LTArray _ (Just len)) =
   text "np.zeros" <> lparen <> int len <> rparen
-initFromLargeType t@(LTBag _) =
-  text "np.array" <>  lparen <> lbrack <> rbrack <> comma
-                  <+> text "ndmin = " <> int (numDim t) <> rparen
-  where numDim (LTSmall _) = 0
-        numDim (LTArray _ _) = 1
-        numDim (LTRow _) = 0
-        numDim LTAny = 0
-        numDim (LTBag ty) = 1 + numDim ty
+initFromLargeType (LTBag _) = lbrack <> rbrack
 initFromLargeType LTAny = text "None"
 
 transCmd :: Context -> Cmd -> Doc
-transCmd _ (CAssign _ (ELength _ elhs) erhs) =
-  let x         = indexedVar elhs
-      xShape    = text x <> dot <> text "shape"
-      newLength = lparen <> transExpr erhs 0 <> comma <> rparen
-      newShape  = newLength <> text "+" <> xShape <> lbrack <> int 1 <> text ":" <> rbrack
-  in text x <> dot <> text "resize" <> lparen <> newShape <> rparen
-transCmd _ (CAssign _ elhs erhs) =
+-- TODO: this needs to be fixed for the general case
+transCmd ctx (CAssign _ (ELength _ elhs) erhs) =
+  let Right typLhs = runTcM $ tcExpr ctx elhs
+  in case typLhs of
+       LTArray _ _ ->
+         let x         = indexedVar elhs
+             xShape    = text x <> dot <> text "shape"
+             newLength = lparen <> transExpr erhs 0 <> comma <> rparen
+             newShape  = newLength <> text "+" <> xShape <> lbrack <> int 1 <> text ":" <> rbrack
+         in text x <> dot <> text "resize" <> lparen <> newShape <> rparen
+       LTBag _ ->
+         let lhsExpr = transExpr elhs 0
+             brackNone = lbrack <> text "None" <> rbrack
+             lenDiff = parens (transExpr erhs 0) <+> text "-" <+> text "len" <> parens lhsExpr
+             extension = brackNone <+> text "*" <+> parens lenDiff
+         in lhsExpr <+> equals <+> lhsExpr <+> text "+" <+> extension
+       _ -> error "Impossible: the typechecker should have caught length upadtes on non bag/array type"
+transCmd ctx (CAssign _ elhs erhs) =
   transExpr elhs 0 <+> equals <+> transExpr erhs 0
-transCmd _ (CLaplace _ x scale mean) =
+transCmd ctx (CLaplace _ x scale mean) =
   text x <+> equals
          <+> text "np.random.laplace" <> lparen <>  transExpr mean 0 <> comma
                                                 <+> float scale      <> rparen
@@ -153,14 +154,38 @@ transCmd ctx (CSeq _ c1 c2) = vcat [
     transCmd ctx c1,
     transCmd ctx c2
   ]
-transCmd _ (CSkip _) = text "pass"
-transCmd _ (CDecl _ x _ typ) =
-  text x <+> equals <+> initFromLargeType typ
-transCmd _ _ = error "Undesugared macro in python transpilation"
+transCmd ctx (CSkip _) = text "pass"
+transCmd ctx (CDecl _ _ _ _) = empty
+transCmd ctx (CRepeat _ iters c) = vcat [
+  text "for"
+  <+> text "_"
+  <+> text "in"
+  <+> text "range" <> lparen <> int iters <> rparen <> colon,
+  nest 2 $ transCmd ctx c]
+transCmd ctx c = transCmd ctx $ desugar c
+
+transInits :: Context -> Doc
+transInits (M.toList -> ctx) =
+  vcat $ map (\(x, typ) -> text x <+> equals <+> initFromLargeType typ) ctx
+
+transInputs :: Context -> [String] -> String -> Doc
+transInputs ctx vars path = vcat $ [readJsonCmd] ++ map initVar vars
+  where readJsonCmd =
+          text "input_data = json.load"
+          <> (parens $ text "open" <> (parens $ quotes $ text path))
+        initVar x =
+          let indexExpr = text "input_data" <> lbrack <> quotes (text x) <> rbrack in
+          case ctx M.! x of
+            LTSmall _ -> text x <+> equals <+> indexExpr
+            LTRow   _ -> text x <+> equals <+> indexExpr
+            LTArray _ _ -> text x <+> equals <+> text "np.array" <> (parens indexExpr)
+            LTBag _ -> text x <+> equals <+> indexExpr
+            LTAny -> text x <+> equals <+> text "None"
 
 imports :: Doc
 imports = vcat [
-  text "import numpy as np"
+  text "import numpy as np",
+  text "import json"
   ]
 
 prologue :: Doc
@@ -171,11 +196,15 @@ prologue = text $ unlines [
   "  return rec_copy"
   ]
 
-transpile :: Context -> Cmd -> String
-transpile ctx c = render $ vcat [
+transpile :: Context -> [String] -> String -> Cmd -> String
+transpile ctx inputVariables jsonPath c = render $ vcat [
     imports,
     text "\n",
     prologue,
+    text "\n",
+    transInits ctx,
+    text "\n",
+    transInputs ctx inputVariables jsonPath,
     text "\n",
     transCmd ctx c,
     text "\n"

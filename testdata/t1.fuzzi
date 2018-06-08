@@ -4,8 +4,8 @@ i  :        int;
 xs :[1.0] { int };
 ys :      { int };
 
-xs1 :[1.0] [ int ](5);
-ys1 :      [ int ](5);
+xs1 :[1.0] [ int ];
+ys1 :      [ int ];
 
 bmap(xs, ys, tx, i, ty, {
   ty = tx * 2;

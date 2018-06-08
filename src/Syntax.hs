@@ -180,8 +180,8 @@ desugarRepeat p n c | n > 0     = (CSeq p) c (desugarRepeat p (n-1) c)
 desugarBMap :: Position -> String -> String -> String -> String -> String -> Cmd -> Cmd
 desugarBMap posn invar outvar tvar ivar outtvar mapCmd =
   (CAssign posn (evar ivar) (intLit posn 0)) `cseq`
-  (CWhile posn loopCond loopBody) `cseq`
-  (CAssign posn (ELength posn (evar outvar)) (ELength posn (evar invar)))
+  (CAssign posn (ELength posn (evar outvar)) (ELength posn (evar invar))) `cseq`
+  (CWhile posn loopCond loopBody)
   where cseq = CSeq posn
         evar = EVar posn
         eindex = EIndex posn
