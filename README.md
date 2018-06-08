@@ -1,4 +1,4 @@
-# typeless-dpimp
+# Fuzzi
 
 ### Install dependencies
 
