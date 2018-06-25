@@ -9,12 +9,18 @@ dws:    { [float](785) };
 
 w_total: { [float](785)};
 
+lamb: float;
+rate: float;
 
 i:    int;
 j:    int;
 
-trow:   [float](785);
-trow1:  [float](786);
+zero785: [float](785);
+zero786: [float](786);
+
+trow:  [float](785);
+trow1: [float](786);
+trow2: [float](786);
 
 wout: [float](785);
 prob: float;
@@ -36,7 +42,10 @@ j_sum: float;
 temp: float;
 size: float;
 
-repeat 10 {
+lamb = 0.1;
+rate = 0.1;
+
+repeat 20 {
 
 bmap(db, db1, trow, i, trow1, {
   j = 0;
@@ -47,23 +56,24 @@ bmap(db, db1, trow, i, trow1, {
   }
 });
 
-bmap(db1, dws, trow1, i, wout, {
+bmap(db1, dws, trow2, i, wout, {
   j = 0;
   repeat 785 {
-    wout[j] = trow1[j];
+    wout[j] = trow2[j];
     j = j + 1;
   };
 
-  dt = dot(wout, w) / 1000.0;
-  temp = clip(exp((0.0-1.0) * (trow1[785]) * dt), 10000.0);
+  dt = clip(dot(wout, w), 10000.0);
+  temp = exp((0.0-1.0) * (trow2[785]) * dt);
   prob = 1.0 / (1.0 + temp);
-  sc = (1.0 - prob) * (trow1[785]);
+  sc = (1.0 - prob) * (trow2[785]);
   wout = scale(sc, wout);
 
   dt = 0.0;
   temp = 0.0;
   prob = 0.0;
   sc = 0.0;
+  j = 0;
 });
 
 j = 0;
@@ -77,14 +87,25 @@ repeat 785 {
   tsum = 0.0;
   bsum(dws_j, j_sum, tsum, i, 2.0);
 
+
   j_sum $= lap(1.0, j_sum);
 
-  w[j] = j_sum / size;
+  w[j] = w[j] + (j_sum / size - 2.0*lamb*(w[j])) * rate ;
   j = j + 1;
 };
 
 i = 0;
 tf_out = 0.0;
 tsum = 0.0;
+wout = zero785;
+tw = zero785;
+trow = zero785;
+trow1 = zero786;
+trow2 = zero786;
+dt = 0.0;
+temp = 0.0;
+prob = 0.0;
+sc = 0.0;
+j = 0;
 
 }

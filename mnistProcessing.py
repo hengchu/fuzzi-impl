@@ -4,8 +4,8 @@ import numpy as np
 import scipy.misc as m
 import random
 import re
-import matplotlib as mpl
-from matplotlib import pyplot as plt
+#import matplotlib as mpl
+#from matplotlib import pyplot as plt
 
 ORIG_SIZE = 28;
 NEW_SIZE = 28;

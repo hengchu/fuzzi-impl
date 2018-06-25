@@ -1,7 +1,6 @@
 import json
 import numpy as np
 import mnist784
-
 SIZE = 784
 
 w = mnist784.w
@@ -21,5 +20,11 @@ correct = 0
 for i in range(len(labels)):
         if (labels[i] * results[i] > 0 ):
                 correct = correct + 1
+
+print "labels: " + str(labels)
+print "results: " + str(results)
+print "w[0]: " + str(w[0])
+#print "w: " + str(w)
+#print "graident: " + str(mnist784.dws)
 
 print("Accuracy: %f\n" % (float(correct)/len(labels)))
