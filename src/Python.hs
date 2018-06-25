@@ -135,7 +135,11 @@ transCmd ctx (CAssign _ (ELength _ elhs) erhs) =
          in lhsExpr <+> equals <+> lhsExpr <+> text "+" <+> extension
        _ -> error "Impossible: the typechecker should have caught length upadtes on non bag/array type"
 transCmd ctx (CAssign _ elhs erhs) =
-  transExpr elhs 0 <+> equals <+> transExpr erhs 0
+  let Right typLhs = runTcM $ tcExpr ctx elhs
+  in case typLhs of
+       LTArray _ _ -> transExpr elhs 0 <+> equals <+> text "np.array" <> lparen <> transExpr erhs 0 <> rparen
+       LTBag _ -> transExpr elhs 0 <+> equals <+> text "copy.deepcopy" <> lparen <> transExpr erhs 0 <> rparen
+       _ -> transExpr elhs 0 <+> equals <+> transExpr erhs 0
 transCmd ctx (CLaplace _ x scale mean) =
   text x <+> equals
          <+> text "np.random.laplace" <> lparen <>  transExpr mean 0 <> comma
@@ -185,7 +189,8 @@ transInputs ctx vars path = vcat $ [readJsonCmd] ++ map initVar vars
 imports :: Doc
 imports = vcat [
   text "import numpy as np",
-  text "import json"
+  text "import json",
+  text "import copy"
   ]
 
 prologue :: Doc
