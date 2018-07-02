@@ -5,6 +5,8 @@ theta_minus: [float](57);
 
 w: [float](57);
 
+wout: float;
+
 p_plus: float;
 p_minus: float;
 
@@ -39,24 +41,22 @@ lab_sum = 0.0;
 tsum = 0.0;
 bsum(all_lab, lab_sum, tsum, i, 0.0);
 
-
 p_plus = lab_sum / size;
 p_plus = (size - lab_sum) / size;
 
-
 j = 0;
 repeat 57 {
-  bmap(db, features_plus, trow, i, wout, { 
-    if (trow[57] == 1.0) {
-      wout = trow[j] 
+  bmap(db, features_plus, t, i, wout, { 
+    if (t[57] == 1.0) {
+      wout = t[j] 
     } else {
       wout = 0.0
     }
   }
 
-  bmap(db, features_minus, trow, i, wout, { 
-    if trow[57] == 0.0 {
-      wout = trow[j] 
+  bmap(db, features_minus, t, i, wout, { 
+    if t[57] == 0.0 {
+      wout = t[j] 
     } else {
       wout = 0.0
     }
@@ -81,3 +81,9 @@ repeat 57 {
 
 b = 0.0;
 bsum(b_collection, b, tsum, i, 0.0);
+
+i = 0;
+j = 0;
+t = zero58;
+w = zero58;
+wout = 0.0;
