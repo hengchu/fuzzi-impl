@@ -1,9 +1,9 @@
-#NEED TO MAKE EVERYTHING BOOLEAN?
-
 db:[1.0]     { [float](58) };
 
-theta_plus: { float };
-theta_minus: { float };
+theta_plus: [float](57);
+theta_minus: [float](57);
+
+w: [float](57);
 
 p_plus: float;
 p_minus: float;
@@ -12,31 +12,72 @@ m_plus: float;
 m_minus: float;
 
 i: int;
+j: int;
 t: [float](58);
 
-lab = float;
+lab: float;
+j_sum: float;
+tsum: float;
 
-# pull all the labels
-bmap(db, db_j, t, i, lab, { 
-  if db[58] == 1{
-    lab = 1;
+b_collection: [float](57);
+
+b: float;
+
+all_lab : { float };
+
+size $= lap(1.0, float(length(db)));
+
+bmap(db, all_lab, t, i, lab, { 
+  if (t[58] == 1.0) {
+    lab = 1.0;
   } else {
-    lab = 0;
+    lab = 0.0;
   }
 });
 
-#sum them
-j_sum = 0.0;
+lab_sum = 0.0;
 tsum = 0.0;
-bsum(db_j, j_sum, tsum, i, 1.0);
-bmap(db, dws, theta_plus, i, wout, {
-});
+bsum(all_lab, lab_sum, tsum, i, 0.0);
 
-#p_plus = 1/(total_num_plusses)
-#p_minus = 1 - p_plus
 
-#p(x_j | y = +1) for each feature j
-#theta_plus_j = gaussian for continuous? Or simple binary (num_ocurrences_of_plus over all i / total_num_plusses)
+p_plus = lab_sum / size;
+p_plus = (size - lab_sum) / size;
 
-#w = ln (theta_plus/theta_minus) - ln((1 -theta_plus)/(1 - theta_minus)) for each j
-# b = sum from j = 1..d(58) ln((1 -theta_plus)/(1 - theta_minus)) - ln(p_minus/p_plus)
+
+j = 0;
+repeat 57 {
+  bmap(db, features_plus, trow, i, wout, { 
+    if (trow[57] == 1.0) {
+      wout = trow[j] 
+    } else {
+      wout = 0.0
+    }
+  }
+
+  bmap(db, features_minus, trow, i, wout, { 
+    if trow[57] == 0.0 {
+      wout = trow[j] 
+    } else {
+      wout = 0.0
+    }
+  }
+
+  j_plus_sum = 0.0;
+  j_minus_sum = 0.0;
+  tsum = 0.0;
+  bsum(features_plus, j_plus_sum, tsum, i, 0.0);
+  bsum(features_minus, j_minus_sum, tsum, i, 0.0);
+
+  theta_plus[j] = j_plus_sum / lab_sum;
+  theta_minus[j] = j_minus_sum / (size - lab_sum);
+
+  w[j] = log(theta_plus[j]/theta_minus[j]) - log ((1 - theta_plus[j])/(1 - theta_minus[j]));
+
+  b_collection[j] = log((1 -theta_plus[j])/(1 - theta_minus[j])) - log(p_minus/p_plus);
+
+  j = j+1;
+
+}
+
+b = 0.0;
+bsum(b_collection, b, tsum, i, 0.0);
