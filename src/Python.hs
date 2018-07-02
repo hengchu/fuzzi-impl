@@ -26,7 +26,7 @@ fixity = M.fromList [(OR, 1), (AND, 1),
 
 opDoc :: M.Map Binop Doc
 opDoc = M.fromList [(OR, text "||"), (AND, text "&&"),
-                    (EQ, equals), (NEQ, text "!="),
+                    (EQ, text "=="), (NEQ, text "!="),
                     (LT, text "<"), (LE, text "<="),
                     (GT, text ">"), (GE, text ">="),
                     (PLUS, text "+"), (MINUS, text "-"),
