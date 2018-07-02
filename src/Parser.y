@@ -57,6 +57,7 @@ import Prelude hiding (LT, GT, EQ)
   partition { TPartition _ }
   length    { TLength _ }
   exp       { TExp _ }
+  log       { TLog _ }
   clip      { TClip _ }
   scale     { TScale _ }
   dot       { TDotP _ }
@@ -164,6 +165,7 @@ Expr
                                                  "float" -> EFloat (token2Position $1) $3
                                                  x -> error $ "Unknown function: " ++ x
                                              }
+  | log '(' Expr ')'                         { ELog (token2Position $1) $3 }
   | exp '(' Expr ')'                         { EExp (token2Position $1) $3 }
   | clip '(' Expr ',' Literal ')'            { EClip (token2Position $1) $3 (fst $5) }
   | scale '(' Expr ',' Expr ')'              { EScale (token2Position $1) $3 $5 }

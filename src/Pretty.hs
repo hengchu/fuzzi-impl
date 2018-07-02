@@ -40,7 +40,7 @@ prettyExpr e =
   foldExpr prettyVar prettyLen prettyLit prettyBinop
            prettyIndex prettyUpdate prettyAccess
            prettyArray prettyBag prettyFloat
-           prettyExp prettyClip prettyScale prettyDot
+           prettyExp prettyLog prettyClip prettyScale prettyDot
            e
 
   where prettyVar _ x = \_ -> text x
@@ -90,6 +90,8 @@ prettyExpr e =
         prettyFloat _ pexpr = \_ -> text "float" <> lparen <> pexpr 0 <> rparen
 
         prettyExp _ pexpr = \_ -> text "exp" <> lparen <> pexpr 0 <> rparen
+
+        prettyLog _ pexpr = \_ -> text "log" <> lparen <> pexpr 0 <> rparen
 
         prettyClip posn pv lit = \_ ->
           text "clip" <> lparen <> pv 0 <> comma

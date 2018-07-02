@@ -126,6 +126,10 @@ checkExpr bctxt ctx (EExp _ e) =
   if checkExpr bctxt ctx e > 0
   then S infinity
   else 0
+checkExpr bctxt ctx (ELog _ e) =
+  if checkExpr bctxt ctx e > 0
+  then S infinity
+  else 0
 checkExpr bctxt ctx (EClip posn e lit) =
   checkClipS posn (checkExpr bctxt ctx e) lit
 checkExpr bctxt ctx (EScale _ escalar evec) =
@@ -160,7 +164,7 @@ freeVars =
   foldExpr checkVar checkLength checkLit checkBinop
            checkIndex checkRupdate checkRaccess
            checkArray checkBag checkFloat
-           checkExp checkClip checkScale checkDot
+           checkExp checkLog checkClip checkScale checkDot
   where
     checkVar _ x = S.singleton x
     checkLength _ fvs = fvs
@@ -173,6 +177,7 @@ freeVars =
     checkRaccess _ sr _ = sr
     checkFloat _ s = s
     checkExp _ s = s
+    checkLog _ s = s
     checkClip _ s _ = s
     checkScale _ s1 s2 = S.union s1 s2
     checkDot _ s1 s2 = S.union s1 s2

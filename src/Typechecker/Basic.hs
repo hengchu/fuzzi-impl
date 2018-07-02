@@ -59,7 +59,7 @@ isNumericLT = \case
 tcExpr :: Context -> Expr -> TcM LargeType
 tcExpr ctx = foldExprM tcVar tcLength tcLit tcBinop tcIndex
                        tcRupdate tcRaccess tcArray
-                       tcBag tcFloat tcExp tcClip
+                       tcBag tcFloat tcExp tcLog tcClip
                        tcScale tcDot
   where tcVar posn = \var ->
           case M.lookup var ctx of
@@ -168,6 +168,11 @@ tcExpr ctx = foldExprM tcVar tcLength tcLit tcBinop tcIndex
         tcExp posn = \t -> do
           when (t /= LTSmall STFloat) $
             tcError posn "exp() must be applied to float"
+          return t
+
+        tcLog posn = \t -> do
+          when (t /= LTSmall STFloat) $
+            tcError posn "log() must be applied to float"
           return t
 
         tcClip posn = \tv lit -> do

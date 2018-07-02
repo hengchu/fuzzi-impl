@@ -30,3 +30,7 @@ ys1 = [1, 2, 3, 4, 5];
 xs1 = [1, 2, 3, 4, 5];
 
 xs1 = xs1 * ys1;
+
+logtx : float;
+
+logtx = log(float(tx));

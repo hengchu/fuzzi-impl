@@ -87,6 +87,8 @@ transExpr (EDot _ el er) _ =
                           <+> transExpr er 0 <> rparen
 transExpr (EExp _ e) _ =
   text "np.exp" <> lparen <> transExpr e 0 <> rparen
+transExpr (ELog _ e) _ =
+  text "np.log" <> lparen <> transExpr e 0 <> rparen
 
 parensIf :: Bool -> Doc -> Doc
 parensIf cond doc = if cond then lparen <> doc <> rparen else doc

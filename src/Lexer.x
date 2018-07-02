@@ -43,6 +43,7 @@ $eol                          ;
 "=="                          { \p _ -> TEqEq p }
 "="                           { \p _ -> TEq p }
 "exp"                         { \p _ -> TExp p }
+"log"                         { \p _ -> TLog p }
 "bmap"                        { \p _ -> TBMap p }
 "amap"                        { \p _ -> TAMap p }
 "bsum"                        { \p _ -> TBSum p }
@@ -112,6 +113,7 @@ data Token = TIdent     AlexPosn String
            | TPartition AlexPosn
            | TLength    AlexPosn
            | TExp       AlexPosn
+           | TLog       AlexPosn
            | TClip      AlexPosn
            | TScale     AlexPosn
            | TDotP      AlexPosn
@@ -162,6 +164,7 @@ getAlexPosn (TBSum      p) = p
 getAlexPosn (TPartition p) = p
 getAlexPosn (TLength    p) = p
 getAlexPosn (TExp       p) = p
+getAlexPosn (TLog       p) = p
 getAlexPosn (TClip      p) = p
 getAlexPosn (TScale     p) = p
 getAlexPosn (TDotP      p) = p
