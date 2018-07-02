@@ -3,6 +3,11 @@ db:[1.0]     { [float](58) };
 theta_plus: [float](57);
 theta_minus: [float](57);
 
+features_plus: { float };
+features_minus: { float };
+
+zero58: [float](58);
+
 w: [float](57);
 
 wout: float;
@@ -17,9 +22,13 @@ i: int;
 j: int;
 t: [float](58);
 
+size: float;
+
 lab: float;
-j_sum: float;
 tsum: float;
+lab_sum: float;
+j_plus_sum: float;
+j_minus_sum: float;
 
 b_collection: [float](57);
 
@@ -30,60 +39,59 @@ all_lab : { float };
 size $= lap(1.0, float(length(db)));
 
 bmap(db, all_lab, t, i, lab, { 
-  if (t[58] == 1.0) {
+  if t[57] == 1.0 then 
     lab = 1.0;
-  } else {
+  else 
     lab = 0.0;
-  }
+  end
 });
 
 lab_sum = 0.0;
 tsum = 0.0;
-bsum(all_lab, lab_sum, tsum, i, 0.0);
+bsum(all_lab, lab_sum, tsum, i, 1.0);
 
 p_plus = lab_sum / size;
-p_plus = (size - lab_sum) / size;
+p_minus = (size - lab_sum) / size;
 
 j = 0;
 repeat 57 {
   bmap(db, features_plus, t, i, wout, { 
-    if (t[57] == 1.0) {
+    if (t[57] == 1.0) then
       wout = t[j] 
-    } else {
+    else
       wout = 0.0
-    }
-  }
+    end
+  });
 
   bmap(db, features_minus, t, i, wout, { 
-    if t[57] == 0.0 {
+    if t[57] == 0.0 then
       wout = t[j] 
-    } else {
+    else
       wout = 0.0
-    }
-  }
+    end
+  });
 
   j_plus_sum = 0.0;
   j_minus_sum = 0.0;
   tsum = 0.0;
-  bsum(features_plus, j_plus_sum, tsum, i, 0.0);
-  bsum(features_minus, j_minus_sum, tsum, i, 0.0);
+  bsum(features_plus, j_plus_sum, tsum, i, 1.0);
+  bsum(features_minus, j_minus_sum, tsum, i, 1.0);
 
   theta_plus[j] = j_plus_sum / lab_sum;
   theta_minus[j] = j_minus_sum / (size - lab_sum);
 
-  w[j] = log(theta_plus[j]/theta_minus[j]) - log ((1 - theta_plus[j])/(1 - theta_minus[j]));
+  w[j] = log((theta_plus[j])/(theta_minus[j])) - log ((1.0 - (theta_plus[j]))/(1.0 - (theta_minus[j])));
 
-  b_collection[j] = log((1 -theta_plus[j])/(1 - theta_minus[j])) - log(p_minus/p_plus);
+  b_collection[j] = log((1.0 - (theta_plus[j]))/(1.0 - (theta_minus[j]))) - log(p_minus/p_plus);
 
   j = j+1;
 
-}
+};
 
 b = 0.0;
-bsum(b_collection, b, tsum, i, 0.0);
+bsum(b_collection, b, tsum, i, 1.0);
 
 i = 0;
 j = 0;
 t = zero58;
-w = zero58;
 wout = 0.0;
