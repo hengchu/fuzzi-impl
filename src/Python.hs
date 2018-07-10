@@ -131,10 +131,8 @@ transCmd ctx (CAssign _ (ELength _ elhs) erhs) =
          in text x <> dot <> text "resize" <> lparen <> newShape <> rparen
        LTBag _ ->
          let lhsExpr = transExpr elhs 0
-             brackNone = lbrack <> text "None" <> rbrack
-             lenDiff = parens (transExpr erhs 0) <+> text "-" <+> text "len" <> parens lhsExpr
-             extension = brackNone <+> text "*" <+> parens lenDiff
-         in lhsExpr <+> equals <+> lhsExpr <+> text "+" <+> extension
+             rhsExpr = transExpr erhs 0
+         in lhsExpr <+> equals <+> text "resize_bag" <> lparen <> lhsExpr <> comma <+> rhsExpr <> rparen
        _ -> error "Impossible: the typechecker should have caught length upadtes on non bag/array type"
 transCmd ctx (CAssign _ elhs erhs) =
   let Right typLhs = runTcM $ tcExpr ctx elhs
@@ -200,7 +198,13 @@ prologue = text $ unlines [
   "def rec_update(rec, k, v):",
   "  rec_copy = rec.copy()",
   "  rec_copy[k] = v",
-  "  return rec_copy"
+  "  return rec_copy",
+  "",
+  "def resize_bag(arr, new_len):",
+  "  if new_len > len(arr):",
+  "    return arr + [None] * (new_len - len(arr))",
+  "  else:",
+  "    return arr[0:new_len]"
   ]
 
 transpile :: Context -> [String] -> String -> Cmd -> String
