@@ -1,19 +1,17 @@
 import json
 import numpy as np
-
+import naiveBayes
 SIZE = 57
 
-f = open('output.json')
-data = json.load(f)
-w = data['w']
-b = data['b']
+w = naiveBayes.w
+b = naiveBayes.b
 
-g = open('testdata/mnist.json')
+g = open('testdata/spam.json')
 train = json.load(g)
 X = train['db']
 
 X_no_labels = np.array([X[i][0:SIZE] for i in range(len(X))])
-labels = [X[i][SIZE] for i in range(len(X))]
+labels = [(X[i][SIZE]*2.0-1.0) for i in range(len(X))]
 
 results = [np.dot(w, X_no_labels[i])+b for i in range(len(X_no_labels))]
 
@@ -22,6 +20,7 @@ print "Our prediction " + str(sign)
 print "Truth: " + str(labels)
 print "w: " + str(np.mean(w))
 print "w var: " + str(np.var(w))
+print "b: " + str(b)
 
 correct = 0
 for i in range(len(labels)):
