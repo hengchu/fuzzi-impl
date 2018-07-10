@@ -1,0 +1,86 @@
+db : [1.0] { [float](5) };
+cs :  { [float](5) };
+
+this_part: { [float](5) };
+
+this_part_k: { float };
+
+tbag1: [float](5);
+
+zero5: [float](5);
+
+tf: float;
+
+part_db : {  { [float](5) } };
+
+dist: float;
+t_dist: float;
+
+k_sum: float;
+tsum: float;
+
+j: int;
+i: int;
+k: int;
+t_idx: int;
+
+repeat 5 {
+
+	partition(db, part_db, tbag1, i, t_idx, 3, {
+	  t_dist = 100000.0;
+	  j = 0;
+	  repeat 3 {
+	  	dist = ((cs[j][0] - (tbag1[0]))*(cs[j][0] - (tbag1[0]))) + ((cs[j][1] - (tbag1[1]))*(cs[j][1] - (tbag1[1]))) + ((cs[j][2] - (tbag1[2]))*(cs[j][2] - (tbag1[2]))) + ((cs[j][3] - (tbag1[3]))*(cs[j][3] - (tbag1[3])));
+
+	    if dist < t_dist then
+	    	t_dist = dist;
+	    	t_idx = j
+	    else 
+	    	skip
+	    end;
+	    j = j + 1;
+	  };
+
+	  dist = 0.0;
+	  t_dist = 0.0;
+	  j = 0;
+	});
+
+	j = 0;
+	repeat 3 {
+
+		this_part = part_db[j];
+		k = 0;
+		repeat 5 {
+			bmap(this_part, this_part_k, tbag1, i, tf, {tf = tbag1[k]});
+
+			k_sum = 0.0;
+	  		tsum = 0.0;
+	  		bsum(this_part_k, k_sum, tsum, i, 8.0);
+
+
+			k_sum = k_sum / float(length(this_part));
+			k_sum = clip(k_sum, 8.0);
+			k_sum $= lap(1.0, k_sum);
+
+			cs[j][k] = k_sum;
+
+			k = k + 1;
+			k_sum = 0.0;
+		};
+
+		j = j + 1;
+	};
+
+	i = 0;
+	j = 0;
+	k = 0;
+	t_idx = 0;
+	k_sum = 0.0;
+	tf = 0.0;
+	tsum = 0.0;
+	tbag1 = zero5;
+	dist = 0.0;
+	t_dist = 0.0;
+}
+
