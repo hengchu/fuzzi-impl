@@ -2,6 +2,10 @@
 
 module Lexer where
 
+import Control.Lens
+import GHC.Generics
+import Data.Generics.Product
+
 }
 
 %wrapper "posn"
@@ -44,10 +48,6 @@ $eol                          ;
 "="                           { \p _ -> TEq p }
 "exp"                         { \p _ -> TExp p }
 "log"                         { \p _ -> TLog p }
-"bmap"                        { \p _ -> TBMap p }
-"amap"                        { \p _ -> TAMap p }
-"bsum"                        { \p _ -> TBSum p }
-"partition"                   { \p _ -> TPartition p }
 "lap"                         { \p _ -> TLaplace p }
 "length"                      { \p _ -> TLength p }
 "clip"                        { \p _ -> TClip p }
@@ -63,6 +63,12 @@ $eol                          ;
 "while"                       { \p _ -> TWhile p }
 "repeat"                      { \p _ -> TRepeat p }
 "skip"                        { \p _ -> TSkip p }
+"fc"                          { \p _ -> TFCast p }
+"v"                           { \p _ -> TVarEscape p }
+"iesc"                        { \p _ -> TIntEscape p }
+"fesc"                        { \p _ -> TFloatEscape p }
+"e"                           { \p _ -> TExprEscape p }
+"c"                           { \p _ -> TCmdEscape p }
 @identifier                   { \p s -> TIdent p s }
 @number \. @number            { \p s -> TFloat p (read s) }
 @number                       { \p s -> TInt p (read s) }
@@ -117,55 +123,14 @@ data Token = TIdent     AlexPosn String
            | TClip      AlexPosn
            | TScale     AlexPosn
            | TDotP      AlexPosn
-  deriving (Show, Eq)
+           | TFCast     AlexPosn
+           | TVarEscape AlexPosn
+           | TIntEscape AlexPosn
+           | TFloatEscape AlexPosn
+           | TExprEscape AlexPosn
+           | TCmdEscape AlexPosn
+  deriving (Generic, Show, Eq)
 
 getAlexPosn :: Token -> AlexPosn
-getAlexPosn (TIdent     p _) = p
-getAlexPosn (TInt       p _) = p
-getAlexPosn (TFloat     p _) = p
-getAlexPosn (TComma     p) = p
-getAlexPosn (TLParen    p) = p
-getAlexPosn (TRParen    p) = p
-getAlexPosn (TLBrace    p) = p
-getAlexPosn (TRBrace    p) = p
-getAlexPosn (TLBrack    p) = p
-getAlexPosn (TRBrack    p) = p
-getAlexPosn (TColon     p) = p
-getAlexPosn (TSemiColon p) = p
-getAlexPosn (TPlus      p) = p
-getAlexPosn (TMinus     p) = p
-getAlexPosn (TMult      p) = p
-getAlexPosn (TDiv       p) = p
-getAlexPosn (TDot       p) = p
-getAlexPosn (TEq        p) = p
-getAlexPosn (TEqEq      p) = p
-getAlexPosn (TNeq       p) = p
-getAlexPosn (TLt        p) = p
-getAlexPosn (TLe        p) = p
-getAlexPosn (TGt        p) = p
-getAlexPosn (TGe        p) = p
-getAlexPosn (TAnd       p) = p
-getAlexPosn (TOr        p) = p
-getAlexPosn (TIf        p) = p
-getAlexPosn (TThen      p) = p
-getAlexPosn (TElse      p) = p
-getAlexPosn (TEnd       p) = p
-getAlexPosn (TDo        p) = p
-getAlexPosn (TRepeat    p) = p
-getAlexPosn (TWhile     p) = p
-getAlexPosn (TSkip      p) = p
-getAlexPosn (TTrue      p) = p
-getAlexPosn (TFalse     p) = p
-getAlexPosn (TSample    p) = p
-getAlexPosn (TLaplace   p) = p
-getAlexPosn (TBMap      p) = p
-getAlexPosn (TAMap      p) = p
-getAlexPosn (TBSum      p) = p
-getAlexPosn (TPartition p) = p
-getAlexPosn (TLength    p) = p
-getAlexPosn (TExp       p) = p
-getAlexPosn (TLog       p) = p
-getAlexPosn (TClip      p) = p
-getAlexPosn (TScale     p) = p
-getAlexPosn (TDotP      p) = p
+getAlexPosn token = token ^. (typed @AlexPosn)
 }

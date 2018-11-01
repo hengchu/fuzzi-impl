@@ -1,5 +1,5 @@
 module Main where
-
+{-
 import Control.Monad
 import Data.Map as M
 import GHC.IO.Handle
@@ -90,3 +90,7 @@ main = runCommand $ \opts _ -> do
         mem <- parseJsonMemory (optInterp opts)
         let mem' = interp (desugarAll ast) (getJsonMemory mem)
         BSL.putStrLn . encode . JsonMemory $ mem'
+-}
+
+main :: IO ()
+main = return ()

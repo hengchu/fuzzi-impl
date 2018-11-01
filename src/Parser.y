@@ -2,12 +2,13 @@
 module Parser where
 
 import Lexer
-import Syntax
+import Syntax hiding (Tau(..))
+import qualified Syntax as S (Tau(..))
 import Data.Map (fromList)
 import Prelude hiding (LT, GT, EQ)
 }
 
-%name      parseProg Cmd
+%name      parseProg Prog
 %name      parseExpr Expr
 %tokentype { Token }
 %error     { parseError }
@@ -47,22 +48,19 @@ import Prelude hiding (LT, GT, EQ)
   else      { TElse _ }
   end       { TEnd _ }
   do        { TDo _ }
-  repeat    { TRepeat _ }
   while     { TWhile _ }
   skip      { TSkip _ }
   laplace   { TLaplace _ }
-  bmap      { TBMap _ }
-  amap      { TAMap _ }
-  bsum      { TBSum _ }
-  partition { TPartition _ }
   length    { TLength _ }
   exp       { TExp _ }
   log       { TLog _ }
   clip      { TClip _ }
   scale     { TScale _ }
   dot       { TDotP _ }
+  fcast     { TFCast _ }
 
 %right ';'
+%nonassoc '='
 %left '.'
 %left '[' '{'
 %left '||'
@@ -75,73 +73,65 @@ import Prelude hiding (LT, GT, EQ)
 
 %%
 
+RecTyPair
+  : ident ':' Ty                              { (getIdent $1, $3) }
+
+RecTyPairs
+  : RecTyPair                                 { [$1] }
+  | RecTyPair ',' RecTyPairs                  { $1 : $3 }
+
+Ty
+  : ident                                     { case getIdent $1 of
+                                                  "int" -> S.TInt
+                                                  "float" -> S.TFloat
+                                                  "bool" -> S.TBool
+                                                  x -> error $ "Unknown type: " ++ x
+                                              }
+  | '[' Ty '(' int ')' ']'                    { S.TArr $2 (Just $ getInt $4) }
+  | '[' Ty ']'                                { S.TArr $2 Nothing }
+  | '{' Ty '}'                                { S.TBag $2 }
+  | '{' RecTyPairs '}'                        { S.TRec . fromList $ $2 }
+
+Decl
+  : ident ':' Ty                          { [Decl (token2Position $1) (getIdent $1) 0.0 $3] }
+  | ident ':' '[' float ']' Ty            { [Decl (token2Position $1) (getIdent $1) (getFloat $4) $6] }
+  | Decl ';' Decl                             { $1 ++ $3 }
+
+Prog
+  : Decl Cmd                                 { Prog $1 $2 }
+
 Cmd
   : skip                                      { CSkip    (token2Position $1) }
-  | Expr '=' Expr                             { CAssign  (token2Position $2) $1 $3 }
-  | ident '$=' laplace '(' float ',' Expr ')' { CLaplace (token2Position $2) (getIdent $1) (getFloat $5) $7 }
-  | ident ':' LargeType                       { CDecl    (token2Position $2) (getIdent $1) 0 $3 }
-  | ident ':' '[' float ']' LargeType         { CDecl    (token2Position $2) (getIdent $1) (getFloat $4) $6 }
+  | Expr '=' Expr                             { CAssign (token2Position $2) $1 $3 }
+  | ident '$=' laplace '(' float ',' Expr ')' { CLaplace (token2Position $2)
+                                                         (getIdent $1)
+                                                         (getFloat $5)
+                                                         $7
+                                              }
   | if Expr then Cmd else Cmd end             { CIf      (token2Position $1) $2 $4 $6 }
   | while Expr do Cmd end                     { CWhile   (token2Position $1) $2 $4 }
   | Cmd ';'                                   { $1 }
   | Cmd ';' Cmd                               { CSeq     (token2Position $2) $1 $3 }
-  | bmap '(' ident ',' ident ',' ident ',' ident ',' ident ',' '{' Cmd '}' ')'
-      { CBMap (token2Position $1)
-              (getIdent $3)
-              (getIdent $5)
-              (getIdent $7)
-              (getIdent $9)
-              (getIdent $11)
-              $14
-      }
-  | amap '(' ident ',' ident ',' ident ',' ident ',' ident ',' '{' Cmd '}' ')'
-      { CAMap (token2Position $1)
-              (getIdent $3)
-              (getIdent $5)
-              (getIdent $7)
-              (getIdent $9)
-              (getIdent $11)
-              $14
-      }
-  | bsum '(' ident ',' ident ',' ident ',' ident ',' Literal ')'
-      { CBSum (token2Position $1) (getIdent $3) (getIdent $5) (getIdent $7) (getIdent $9) (fst $11) }
-  | partition '(' ident ',' ident ',' ident ',' ident ',' ident ',' int ',' '{' Cmd '}' ')'
-      { CPartition (token2Position $1)
-                   (getIdent $3)
-                   (getIdent $5)
-                   (getIdent $7)
-                   (getIdent $9)
-                   (getIdent $11)
-                   (getInt $13)
-                   $16
-      }
-  | repeat int '{' Cmd '}' { CRepeat (token2Position $1) (getInt $2) $4 }
+  | ident '(' ExtensionParams ')'             { CExt (token2Position $1) (getIdent $1) $3 }
 
-SmallType
-  : ident { case (getIdent $1) of
-              "int"   -> STInt
-              "float" -> STFloat
-              "bool"  -> STBool
-              x       -> error $ "Unknown type: " ++ x
-          }
+Literal
+  : int                                      { (token2Position $1, LInt (getInt $1)) }
+  | float                                    { (token2Position $1, LFloat (getFloat $1)) }
+  | '[' ManyExprs ']'                        { (token2Position $1, LArr $2) }
+  | '{' ManyExprs '}'                        { (token2Position $1, LBag $2) }
 
-LabelTypePair
-  : ident ':' SmallType { (getIdent $1, $3) }
+AtomExpr
+: ident                     {EVar (token2Position $1) (getIdent $1)}
+| Literal                   {ELit (fst $1) (snd $1)}
+| '(' Expr ')'              {$2}
 
-LabelTypePairs
-  : LabelTypePair                    { [$1]    }
-  | LabelTypePair ',' LabelTypePairs { $1 : $3 }
-
-LargeType
-  : SmallType                     { LTSmall $1 }
-  | '{' LabelTypePairs '}'        { LTRow . RowType . fromList $ $2 }
-  | '[' SmallType ']'             { LTArray  $2 Nothing }
-  | '[' SmallType ']' '(' int ')' { LTArray $2 (Just $ getInt $5) }
-  | '{' LargeType '}'             { LTBag $2 }
+IndexExpr
+: AtomExpr '[' Expr ']'     {EIndex (token2Position $2) $1 $3}
+| IndexExpr '[' Expr ']'    {EIndex (token2Position $2) $1 $3}
 
 Expr
-  : Literal                                  { ELit (snd $1) (fst $1) }
-  | ident                                    { EVar (token2Position $1) (getIdent $1) }
+  : AtomExpr                                 { $1 }
+  | IndexExpr                                { $1 }
   | length '(' Expr ')'                      { ELength (token2Position $1) $3 }
   | Expr '+' Expr                            { EBinop (token2Position $2) $1 PLUS  $3 }
   | Expr '-' Expr                            { EBinop (token2Position $2) $1 MINUS $3 }
@@ -155,38 +145,23 @@ Expr
   | Expr '!=' Expr                           { EBinop (token2Position $2) $1 NEQ   $3 }
   | Expr '&&' Expr                           { EBinop (token2Position $2) $1 AND   $3 }
   | Expr '||' Expr                           { EBinop (token2Position $2) $1 OR    $3 }
-  | Expr '[' Expr ']'                        { EIndex (token2Position $2) $1 $3       }
-  | Expr '{' ident '=' Expr '}'              { ERUpdate (token2Position $2) $1 (getIdent $3) $5  }
-  | Expr '.' ident                           { ERAccess (token2Position $2) $1 (getIdent $3)     }
-  | '(' Expr ')' %prec ATOM                  { $2 }
-  | '[' ManyExprs ']'                        { EArray (token2Position $1) $2 }
-  | '{' ManyExprs '}'                        { EArray (token2Position $1) $2 }
-  | ident '(' Expr ')'                       { case getIdent $1 of
-                                                 "float" -> EFloat (token2Position $1) $3
-                                                 x -> error $ "Unknown function: " ++ x
-                                             }
+  | Expr '.' ident                           { ERAccess (token2Position $2) $1 (getIdent $3) }
+  | fcast '(' Expr ')'                       { EFloat (token2Position $1) $3 }
   | log '(' Expr ')'                         { ELog (token2Position $1) $3 }
   | exp '(' Expr ')'                         { EExp (token2Position $1) $3 }
-  | clip '(' Expr ',' Literal ')'            { EClip (token2Position $1) $3 (fst $5) }
   | scale '(' Expr ',' Expr ')'              { EScale (token2Position $1) $3 $5 }
   | dot '(' Expr ',' Expr ')'                { EDot (token2Position $1) $3 $5 }
 
-SmallLiteral
-  : int   { (SILit (getInt $1), token2Position $1) }
-  | float { (SFLit (getFloat $1), token2Position $1) }
-  | true  { (SBLit True, token2Position $1) }
-  | false { (SBLit False, token2Position $1) }
+CmdBlock
+: '{' Cmd '}' { $2 }
 
-Literal
-  : SmallLiteral              { (SLit (fst $1), snd $1) }
-  | '{' LabelLiteralPairs '}' { (RLit . RowLit $ fromList $2, token2Position $1) }
+ExtensionParam
+: Expr     { PExpr $1 }
+| CmdBlock { PCmd $1  }
 
-LabelLiteralPair
-  : ident '=' SmallLiteral   { (getIdent $1, fst $3) }
-
-LabelLiteralPairs
-  : LabelLiteralPair                       { [$1]    }
-  | LabelLiteralPair ',' LabelLiteralPairs { $1 : $3 }
+ExtensionParams
+: ExtensionParam { [$1] }
+| ExtensionParam ',' ExtensionParams { $1 : $3 }
 
 ManyExprs
   : Expr               { [$1]    }
