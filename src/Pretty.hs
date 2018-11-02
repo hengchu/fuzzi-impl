@@ -1,7 +1,14 @@
+{-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE LambdaCase #-}
 
-module Pretty where
+module Pretty (
+  prettyCmd
+  , prettyExpr
+  , Pretty.render
+  , PrettyCmd(..)
+  , PrettyExpr(..)
+  ) where
 
 import Data.Map hiding (foldr)
 import qualified Data.Map as M
@@ -9,6 +16,10 @@ import qualified Data.Map as M
 import Syntax
 import Prelude hiding (LT, EQ, GT)
 import Text.PrettyPrint
+import Test.QuickCheck
+
+render :: Doc -> String
+render = Text.PrettyPrint.render
 
 precedence :: Map Binop Int
 precedence = M.fromList [(OR, 0), (AND, 1),
@@ -18,6 +29,12 @@ precedence = M.fromList [(OR, 0), (AND, 1),
                          (MULT, 5), (DIV, 5)
                         ]
 
+getPrecedence :: Binop -> Int
+getPrecedence op =
+  case M.lookup op precedence of
+    Nothing -> error $ "Undefined precedence for operator: " ++ show op
+    Just p -> p
+
 fixity :: Map Binop Int
 fixity = M.fromList [(OR, 1), (AND, 1),
                      (EQ, 0), (NEQ, 0),
@@ -26,196 +43,113 @@ fixity = M.fromList [(OR, 1), (AND, 1),
                      (MULT, 1), (DIV, 1)
                     ]
 
+getFixity :: Binop -> Int
+getFixity op =
+  case M.lookup op fixity of
+    Nothing -> error $ "Undefined fixity for operator: " ++ show op
+    Just f -> f
+
 opDoc :: Map Binop Doc
 opDoc = M.fromList [(OR, text "||"), (AND, text "&&"),
-                    (EQ, equals), (NEQ, text "!="),
+                    (EQ, text "=="), (NEQ, text "!="),
                     (LT, text "<"), (LE, text "<="),
                     (GT, text ">"), (GE, text ">="),
                     (PLUS, text "+"), (MINUS, text "-"),
                     (MULT, text "*"), (DIV, text "/")
                    ]
 
+parensIf :: Bool -> Doc -> Doc
+parensIf cond doc = if cond then lparen <> doc <> rparen else doc
+
+concatWith :: Doc -> [Doc] -> Doc
+concatWith _ [] = mempty
+concatWith _ (x:[]) = x
+concatWith sep (x:xs) = x <> sep <> concatWith sep xs
+
+prettyLit :: Lit -> Doc
+prettyLit (LInt i) = int i
+prettyLit (LFloat f) = float f
+prettyLit (LBool b) = if b then text "true" else text "false"
+prettyLit (LArr es) =
+  brackets $ concatWith (comma <> text " ") $ fmap (flip prettyExpr 0) es
+prettyLit (LBag es) =
+  braces $ concatWith (comma <> text " ") $ fmap (flip prettyExpr 0) es
+
 prettyExpr :: Expr -> Int -> Doc
-prettyExpr e =
-  foldExpr prettyVar prettyLen prettyLit prettyBinop
-           prettyIndex prettyUpdate prettyAccess
-           prettyArray prettyBag prettyFloat
-           prettyExp prettyLog prettyClip prettyScale prettyDot
-           e
+prettyExpr (EVar _ x)    _ = text x
+prettyExpr (ELength _ e) _ = text "length" <> (parens $ prettyExpr e 0)
+prettyExpr (ELit _ lit)  _ = prettyLit lit
+prettyExpr (EBinop _ e1 op e2) p =
+  let opPrec = getPrecedence op
+      opFixity = getFixity op
+  in parensIf (p > opPrec)
+       $ (prettyExpr e1 opPrec) <+> opDoc ! op <+> (prettyExpr e2 (opPrec + opFixity))
+prettyExpr (EIndex _ e1 e2) _ =
+  (parens $ prettyExpr e1 0) <> lbrack <> prettyExpr e2 0 <> rbrack
+prettyExpr (ERAccess _ e label) _ =
+  (parens $ prettyExpr e 0) <> text "." <> text label
+prettyExpr (EFloat _ e) _ =
+  text "fc" <> (parens $ prettyExpr e 0)
+prettyExpr (EExp _ e) _ =
+  text "exp" <> (parens $ prettyExpr e 0)
+prettyExpr (ELog _ e) _ =
+  text "log" <> (parens $ prettyExpr e 0)
+prettyExpr (EClip _ e lit) _ =
+  text "clip" <> (parens $ prettyExpr e 0 <> comma <+> prettyLit lit)
+prettyExpr (EScale _ e1 e2) _ =
+  text "scale" <> (parens $ prettyExpr e1 0 <> comma <+> prettyExpr e2 0)
+prettyExpr (EDot _ e1 e2) _ =
+  text "dot" <> (parens $ prettyExpr e1 0 <> comma <+> prettyExpr e2 0)
 
-  where prettyVar _ x = \_ -> text x
+prettyParam :: Param -> Doc
+prettyParam (PExpr e) = prettyExpr e 0
+prettyParam (PCmd c) =
+  vcat [
+  lbrace
+  , nest 2 $ prettyCmd c
+  , rbrace
+  ]
 
-        prettyLen _ pe = \_ -> text "length" <> lparen <> pe 0 <> rparen
-
-        prettySmallLit = \case
-          SILit i -> int i
-          SFLit f -> float f
-          SBLit b -> text $ if b then "true" else "false"
-
-        prettyRowLit rlit =
-          M.foldrWithKey
-            (\label slit doc -> text label <+> equals <+> prettySmallLit slit <> comma <+> doc)
-            mempty
-            rlit
-
-        prettyLit _ lit = \_ ->
-          case lit of
-            SLit slit -> prettySmallLit slit
-            RLit (getRowLits -> rlit) ->
-              lbrace <> prettyRowLit rlit <> rbrace
-
-        parensIf cond doc = if cond then lparen <> doc <> rparen else doc
-
-        prettyBinop _ plhs op prhs = \prec ->
-          let f = fixity     ! op
-              p = precedence ! op
-          in parensIf (prec > p) $ (plhs p) <+> opDoc ! op <+> (prhs (p + f))
-
-        prettyIndex _ parr pidx = \prec ->
-          parr prec <> lbrack <> pidx 0 <> rbrack
-
-        prettyUpdate _ prow label pvalue = \prec ->
-          prow prec <> lbrace <+> text label <+> equals <+> pvalue 0 <+> rbrace
-
-        prettyAccess _ prow label = \prec ->
-          prow prec <> text "." <> text label
-
-        prettyArrContents pexprs =
-          foldr (\pe acc -> pe 0 <> comma <+> acc) mempty pexprs
-
-        prettyArray _ pexprs = \_ -> lbrack <> prettyArrContents pexprs <> rbrack
-
-        prettyBag _ exprs = \_ -> lbrace <> prettyArrContents exprs <> rbrace
-
-        prettyFloat _ pexpr = \_ -> text "float" <> lparen <> pexpr 0 <> rparen
-
-        prettyExp _ pexpr = \_ -> text "exp" <> lparen <> pexpr 0 <> rparen
-
-        prettyLog _ pexpr = \_ -> text "log" <> lparen <> pexpr 0 <> rparen
-
-        prettyClip posn pv lit = \_ ->
-          text "clip" <> lparen <> pv 0 <> comma
-                      <+> prettyLit posn lit (0 :: Int) <> rparen
-
-        prettyScale _ pe1 pe2 = \_ ->
-          text "scale" <> lparen <> pe1 0 <> comma
-                       <+> pe2 0 <> rparen
-
-        prettyDot _ pe1 pe2 = \_ ->
-          text "dot" <> lparen <> pe1 0 <> comma
-                     <+> pe2 0 <> rparen
+prettyParams :: [Param] -> Doc
+prettyParams params =
+  concatWith (comma <> text " ") $ fmap prettyParam params
 
 prettyCmd :: Cmd -> Doc
-prettyCmd =
-  foldCmd prettyAssign
-          prettyLaplace prettyIf prettyWhile prettyDecl
-          prettySeq prettySkip prettyBmap prettyAmap
-          prettyBsum prettyPartition prettyRepeat
-  where
-    prettyAssign _ x e = prettyExpr x 0 <+> equals <+> prettyExpr e 0
+prettyCmd (CAssign _ lhs rhs) =
+  prettyExpr lhs 0 <+> equals <+> prettyExpr rhs 0
+prettyCmd (CLaplace _ x b rhs) =
+  text x <+> text "$=" <+> text "lap" <> (parens $ float b <> comma <+> prettyExpr rhs 0)
+prettyCmd (CIf _ e c1 c2) =
+  vcat [
+  text "if" <+> prettyExpr e 0 <+> text "then"
+  , nest 2 $ prettyCmd c1 <> text ";"
+  , text "else"
+  , nest 2 $ prettyCmd c2 <> text ";"
+  , text "end"
+  ]
+prettyCmd (CWhile _ e c) =
+  vcat [
+  text "while" <+> prettyExpr e 0 <+> text "do"
+  , nest 2 $ prettyCmd c <> text ";"
+  , text "end"
+  ]
+prettyCmd (CSeq _ c1 c2) =
+  vcat [
+  prettyCmd c1 <> text ";"
+  , prettyCmd c2
+  ]
+prettyCmd (CSkip _) =
+  text "skip"
+prettyCmd (CExt _ name params) =
+  text name <> (parens $ prettyParams params)
 
-    prettyLaplace _ x width e =
-      text x <+> text "$=" <+> text "laplace" <> lparen <> float width <> comma <+> prettyExpr e 0 <> rparen
+newtype PrettyCmd = PrettyCmd Cmd
+  deriving (Arbitrary)
+newtype PrettyExpr = PrettyExpr Expr
+  deriving (Arbitrary)
 
-    prettyIf _ e ct cf =
-      text "if" <+> prettyExpr e 0 <+> text "then"
-      $$
-      nest 2 ct
-      $$
-      text "else"
-      $$
-      nest 2 cf
-      $$
-      text "end"
+instance Show PrettyCmd where
+  show (PrettyCmd c) = Pretty.render $ prettyCmd c
 
-    prettyWhile _ e c =
-      text "while" <+> prettyExpr e 0 <+> text "do"
-      $$
-      nest 2 c
-      $$
-      text "end"
-
-    prettyST = \case
-      STInt -> text "int"
-      STFloat -> text "float"
-      STBool -> text "bool"
-      STAny -> text "any"
-
-    prettyRT rt =
-      M.foldrWithKey (\label st doc -> text label <+> colon <+> prettyST st <> comma <+> doc) mempty rt
-
-    prettyLT = \case
-      LTSmall st -> prettyST st
-      LTRow (getRowTypes -> rt) -> lbrace <+> prettyRT rt <+> rbrace
-      LTArray st maybeLen ->
-        case maybeLen of
-          Just len -> lbrack <> prettyST st <> rbrack <> lparen <> int len <> rparen
-          Nothing -> lbrack <> prettyST st <> rbrack
-      LTBag lt -> lbrace <> prettyLT lt <> rbrace
-      LTAny -> text "any"
-
-    prettyDecl _ x s t =
-      text x <+> colon <> lbrack <> float s <> rbrack <+> prettyLT t
-
-    prettySeq _ c1 c2 =
-      c1 <> text ";"
-      $$
-      c2
-
-    prettySkip _ = text "skip"
-
-    prettyBmap _ invar outvar tvar ivar outtemp c =
-      text "bmap"
-        <> lparen
-        <> text invar
-        <> comma <+> text outvar
-        <> comma <+> text tvar
-        <> comma <+> text ivar
-        <> comma <+> text outtemp
-        <> comma <+> lbrace
-        $$ nest 2 c
-        $$ rbrace
-        <> rparen
-
-    prettyAmap _ invar outvar tvar ivar outtemp c =
-      text "amap"
-        <> lparen
-        <> text invar
-        <> comma <+> text outvar
-        <> comma <+> text tvar
-        <> comma <+> text ivar
-        <> comma <+> text outtemp
-        <> comma <+> lbrace
-        $$ nest 2 c
-        $$ rbrace
-        <> rparen
-
-    prettyBsum posn invar outvar tvar ivar b =
-      text "bsum"
-        <> lparen
-        <> text invar
-        <> comma <+> text outvar
-        <> comma <+> text tvar
-        <> comma <+> text ivar
-        <> comma <+> prettyExpr (ELit posn b) 0
-        <> rparen
-
-    prettyPartition _ invar outvar tvar ivar outindex npart c =
-      text "partition"
-        <> lparen
-        <> text invar
-        <> comma <+> text outvar
-        <> comma <+> text tvar
-        <> comma <+> text ivar
-        <> comma <+> text outindex
-        <> comma <+> int npart
-        <> comma <+> lbrace
-        $$
-        nest 2 c
-        $$ rbrace
-        <> rparen
-
-    prettyRepeat _ iters c =
-      text "repeat" <+> int iters <+> lbrace
-      $$ nest 2 c
-      <> rbrace
+instance Show PrettyExpr where
+  show (PrettyExpr e) = Pretty.render $ prettyExpr e 0

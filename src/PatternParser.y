@@ -1,7 +1,7 @@
 {
 module PatternParser where
 
-import Lexer
+import PatternLexer
 import Syntax hiding (Tau(..))
 import qualified Syntax as S (Tau(..))
 import Data.Map (fromList)

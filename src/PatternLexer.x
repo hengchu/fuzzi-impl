@@ -1,6 +1,6 @@
 {
 
-module Lexer where
+module PatternLexer where
 
 import Control.Lens
 import GHC.Generics
@@ -16,9 +16,6 @@ $whitespace = [\ \t]
 $eol        = [\n\r]
 
 @number     = $digit+
-@decimal    = @number \. @number
-@scientific = @decimal "e" "-"{0,1} @number
-@float      = (@decimal|@scientific)
 @identifier = $alpha($alpha|_|$digit|')*
 
 tokens :-
@@ -67,8 +64,13 @@ $eol                          ;
 "repeat"                      { \p _ -> TRepeat p }
 "skip"                        { \p _ -> TSkip p }
 "fc"                          { \p _ -> TFCast p }
+"v"                           { \p _ -> TVarEscape p }
+"iesc"                        { \p _ -> TIntEscape p }
+"fesc"                        { \p _ -> TFloatEscape p }
+"e"                           { \p _ -> TExprEscape p }
+"c"                           { \p _ -> TCmdEscape p }
 @identifier                   { \p s -> TIdent p s }
-@float                        { \p s -> TFloat p (read s) }
+@number \. @number            { \p s -> TFloat p (read s) }
 @number                       { \p s -> TInt p (read s) }
 
 {
@@ -122,6 +124,11 @@ data Token = TIdent     AlexPosn String
            | TScale     AlexPosn
            | TDotP      AlexPosn
            | TFCast     AlexPosn
+           | TVarEscape AlexPosn
+           | TIntEscape AlexPosn
+           | TFloatEscape AlexPosn
+           | TExprEscape AlexPosn
+           | TCmdEscape AlexPosn
   deriving (Generic, Show, Eq)
 
 getAlexPosn :: Token -> AlexPosn

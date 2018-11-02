@@ -9,6 +9,7 @@ import Prelude hiding (LT, GT, EQ)
 }
 
 %name      parseProg Prog
+%name      parseCmd  Cmd
 %name      parseExpr Expr
 %tokentype { Token }
 %error     { parseError }
@@ -116,7 +117,11 @@ Cmd
 
 Literal
   : int                                      { (token2Position $1, LInt (getInt $1)) }
+  | '-' int %prec ATOM                       { (token2Position $1, LInt (-(getInt $2))) }
   | float                                    { (token2Position $1, LFloat (getFloat $1)) }
+  | '-' float %prec ATOM                     { (token2Position $1, LFloat (-(getFloat $2))) }
+  | true                                     { (token2Position $1, LBool True) }
+  | false                                    { (token2Position $1, LBool False) }
   | '[' ManyExprs ']'                        { (token2Position $1, LArr $2) }
   | '{' ManyExprs '}'                        { (token2Position $1, LBag $2) }
 
@@ -145,12 +150,13 @@ Expr
   | Expr '!=' Expr                           { EBinop (token2Position $2) $1 NEQ   $3 }
   | Expr '&&' Expr                           { EBinop (token2Position $2) $1 AND   $3 }
   | Expr '||' Expr                           { EBinop (token2Position $2) $1 OR    $3 }
-  | Expr '.' ident                           { ERAccess (token2Position $2) $1 (getIdent $3) }
+  | AtomExpr '.' ident                       { ERAccess (token2Position $2) $1 (getIdent $3) }
   | fcast '(' Expr ')'                       { EFloat (token2Position $1) $3 }
   | log '(' Expr ')'                         { ELog (token2Position $1) $3 }
   | exp '(' Expr ')'                         { EExp (token2Position $1) $3 }
   | scale '(' Expr ',' Expr ')'              { EScale (token2Position $1) $3 $5 }
   | dot '(' Expr ',' Expr ')'                { EDot (token2Position $1) $3 $5 }
+  | clip '(' Expr ',' Literal ')'            { EClip (token2Position $1) $3 (snd $5) }
 
 CmdBlock
 : '{' Cmd '}' { $2 }
@@ -160,11 +166,13 @@ ExtensionParam
 | CmdBlock { PCmd $1  }
 
 ExtensionParams
-: ExtensionParam { [$1] }
+:                { [] }
+| ExtensionParam { [$1] }
 | ExtensionParam ',' ExtensionParams { $1 : $3 }
 
 ManyExprs
-  : Expr               { [$1]    }
+  :                    { [] }
+  | Expr               { [$1]    }
   | Expr ',' ManyExprs { $1 : $3 }
 
 {

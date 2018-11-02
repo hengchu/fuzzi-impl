@@ -33,29 +33,31 @@ library
   hs-source-dirs:
       src
   build-depends:
-      base >=4.7 && <5
-      , containers
-      , array
-      , mtl
-      , logfloat
-      , pretty
-      , aeson
-      , attoparsec
-      , unordered-containers
-      , text
-      , vector
-      , scientific
+                base >=4.7 && <5
+              , containers
+              , array
+              , mtl
+              , logfloat
+              , pretty
+              , aeson
+              , attoparsec
+              , unordered-containers
+              , text
+              , vector
+              , scientific
               , generic-lens
               , lens
               , data-fix
+              , QuickCheck
   exposed-modules:
                   Lib
                 , Syntax
                 , Lexer
+                , PatternLexer
                 , Parser
                 , PatternParser
                 , Match
-      --, Pretty
+                , Pretty
       --, Interp
       --, Python
       --, Typechecker.Basic
@@ -75,6 +77,9 @@ library
                    , DeriveFunctor
                    , TypeOperators
                    , ApplicativeDo
+                   , ViewPatterns
+                   , LambdaCase
+                   , GeneralizedNewtypeDeriving
 
 executable fuzzi
   main-is: Main.hs
@@ -104,6 +109,7 @@ test-suite fuzzi-impl-test
               , fuzzi-impl
               , raw-strings-qq
               , containers
+              , QuickCheck
   other-modules:
       Paths_fuzzi_impl
   default-language: Haskell2010

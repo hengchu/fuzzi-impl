@@ -1,18 +1,22 @@
-import Lexer
+import qualified Lexer        as L
+import qualified PatternLexer as PL
 import Parser
 import PatternParser
+import Syntax
+import Pretty
 import Match
+import Test.QuickCheck
 import Text.RawString.QQ
 import qualified Data.Map as M
 
 import Control.Monad
+import System.Exit
 
 prog1 :: String
 prog1 = [r|
-x : int;
-y : float
+x : int
 
-x = fc(x) + y;
+x = A < D && (exp(jaYfA) && (fc(H)).rRN)
 |]
 
 prog2 :: String
@@ -122,24 +126,63 @@ epatterns = [(epat1, e1), (epat2, e2), (epat3, e3), (epat3, e4)]
 patterns :: [String]
 patterns = [pat1, pat2, pat3]
 
-main :: IO ()
-main = do
+prop_roundtrip :: PrettyCmd -> Bool
+prop_roundtrip pc@(PrettyCmd c) =
+  let pp = show pc
+      c' = parseCmd . L.alexScanTokens $ pp
+      ppc = show (PrettyCmd c')
+  in ppc == pp
+
+prop_exprEquiv_id :: PrettyExpr -> Bool
+prop_exprEquiv_id (PrettyExpr e) =
+  exprEquiv e e
+
+prop_cmdEquiv_id :: PrettyCmd -> Bool
+prop_cmdEquiv_id (PrettyCmd c) =
+  cmdEquiv c c
+
+unitTests :: IO ()
+unitTests = do
   forM_ progs $ \p -> do
     putStrLn "=============="
     putStrLn p
-    print . parseProg . alexScanTokens $ p
+    let ast = parseProg . L.alexScanTokens $ p
+    let pp  = render . prettyCmd $ (getCmd ast)
+    putStrLn pp
+    let ast2 = parseCmd . L.alexScanTokens $ pp
+    when (not $ (getCmd ast) `cmdEquiv` ast2) $ do
+      putStrLn "Prettyprinter and parser disagreed!"
+      print (getCmd ast)
+      print ast2
+      exitWith (ExitFailure 1)
 
   forM_ patterns $ \p -> do
     putStrLn "--------------"
     putStrLn p
-    print . parseCmdPattern . alexScanTokens $ p
+    print . parseCmdPattern . PL.alexScanTokens $ p
 
   forM_ epatterns $ \(p, e) -> do
     putStrLn "**************"
     putStrLn p
     putStrLn e
-    let pp = parseExprPattern . alexScanTokens $ p
-    let pe = parseExpr . alexScanTokens $ e
+    let pp = parseExprPattern . PL.alexScanTokens $ p
+    let pe = parseExpr . L.alexScanTokens $ e
     print pp
     print pe
     print $ matchExpr pp pe M.empty
+
+isSuccess :: Result -> Bool
+isSuccess (Success _ _ _) = True
+isSuccess _ = False
+
+main :: IO ()
+main = do
+  unitTests
+  putStrLn ""
+  putStrLn "*******************"
+  putStrLn "*  QuiCheckTests  *"
+  putStrLn "*******************"
+  r <- quickCheckWithResult stdArgs{maxSize=10, maxSuccess=1000} prop_roundtrip
+  when (not $ isSuccess r) $ do
+    putStrLn "-------------------"
+    print r
