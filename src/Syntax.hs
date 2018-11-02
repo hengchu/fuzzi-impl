@@ -25,13 +25,13 @@ data Lit = LInt Int
          | LBool Bool
          | LArr [Expr]
          | LBag [Expr]
-  deriving (Show, Eq)
+  deriving (Show, Eq, Ord)
 
 type Line   = Int
 type Column = Int
 
 data Position = Position Line Column
-  deriving (Show, Eq)
+  deriving (Show, Eq, Ord)
 
 type Var = String
 
@@ -53,7 +53,7 @@ data Expr = EVar     Position Var
           | EDot     Position
                      Expr     -- ^Vector
                      Expr     -- ^Vector
-  deriving (Generic, Show, Eq)
+  deriving (Generic, Show, Eq, Ord)
 
 data AtomPattern a = AtomExact a
                    | AtomWild Var
@@ -103,7 +103,7 @@ data Prog = Prog {
 
 data Param = PExpr Expr
            | PCmd  Cmd
-  deriving (Show, Eq)
+  deriving (Show, Eq, Ord)
 
 data Cmd = CAssign       Position Expr   Expr
          | CLaplace      Position Var    Float Expr
@@ -112,7 +112,7 @@ data Cmd = CAssign       Position Expr   Expr
          | CSeq          Position Cmd    Cmd
          | CSkip         Position
          | CExt          Position String [Param]
-  deriving (Generic, Show, Eq)
+  deriving (Generic, Show, Eq, Ord)
 
 data CmdPattern = CPWild    Position Var
                 | CPAssign  Position ExprPattern ExprPattern

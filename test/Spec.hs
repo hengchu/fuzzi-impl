@@ -1,7 +1,9 @@
 import Lexer
 import Parser
 import PatternParser
+import Match
 import Text.RawString.QQ
+import qualified Data.Map as M
 
 import Control.Monad
 
@@ -87,6 +89,36 @@ end;
 x = 0;
 |]
 
+epat1 :: String
+epat1 = [r|
+v(x_) + v(y_) + e(z_)
+|]
+
+e1 :: String
+e1 = "x + y + z"
+
+epat2 :: String
+epat2 = [r|
+v(x_) + v(y_) + iesc(z_)
+|]
+
+e2 :: String
+e2 = "x + y + 10"
+
+epat3 :: String
+epat3 = [r|
+e(x_) + e(z_)
+|]
+
+e3 :: String
+e3 = "x * y + 10"
+
+e4 :: String
+e4 = "x + y * 10"
+
+epatterns :: [(String, String)]
+epatterns = [(epat1, e1), (epat2, e2), (epat3, e3), (epat3, e4)]
+
 patterns :: [String]
 patterns = [pat1, pat2, pat3]
 
@@ -101,3 +133,13 @@ main = do
     putStrLn "--------------"
     putStrLn p
     print . parseCmdPattern . alexScanTokens $ p
+
+  forM_ epatterns $ \(p, e) -> do
+    putStrLn "**************"
+    putStrLn p
+    putStrLn e
+    let pp = parseExprPattern . alexScanTokens $ p
+    let pe = parseExpr . alexScanTokens $ e
+    print pp
+    print pe
+    print $ matchExpr pp pe M.empty

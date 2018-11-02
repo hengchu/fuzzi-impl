@@ -49,11 +49,12 @@ library
               , lens
               , data-fix
   exposed-modules:
-      Lib
-      , Syntax
-      , Lexer
+                  Lib
+                , Syntax
+                , Lexer
                 , Parser
                 , PatternParser
+                , Match
       --, Pretty
       --, Interp
       --, Python
@@ -73,6 +74,7 @@ library
                    , TypeApplications
                    , DeriveFunctor
                    , TypeOperators
+                   , ApplicativeDo
 
 executable fuzzi
   main-is: Main.hs
@@ -101,6 +103,7 @@ test-suite fuzzi-impl-test
                 base >=4.7 && <5
               , fuzzi-impl
               , raw-strings-qq
+              , containers
   other-modules:
       Paths_fuzzi_impl
   default-language: Haskell2010
