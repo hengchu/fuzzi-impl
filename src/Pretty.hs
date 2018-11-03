@@ -14,7 +14,7 @@ import Data.Map hiding (foldr)
 import qualified Data.Map as M
 
 import Syntax
-import Prelude hiding (LT, EQ, GT)
+import Prelude hiding (LT, EQ, GT, (<>))
 import Text.PrettyPrint
 import Test.QuickCheck
 
@@ -144,12 +144,20 @@ prettyCmd (CExt _ name params) =
   text name <> (parens $ prettyParams params)
 
 newtype PrettyCmd = PrettyCmd Cmd
-  deriving (Arbitrary)
+  deriving (Eq)
 newtype PrettyExpr = PrettyExpr Expr
-  deriving (Arbitrary)
+  deriving (Eq)
 
 instance Show PrettyCmd where
   show (PrettyCmd c) = Pretty.render $ prettyCmd c
 
 instance Show PrettyExpr where
   show (PrettyExpr e) = Pretty.render $ prettyExpr e 0
+
+instance Arbitrary PrettyCmd where
+  arbitrary = PrettyCmd <$> arbitrary
+  shrink (PrettyCmd c) = PrettyCmd <$> shrink c
+
+instance Arbitrary PrettyExpr where
+  arbitrary = PrettyExpr <$> arbitrary
+  shrink (PrettyExpr e) = PrettyExpr <$> shrink e

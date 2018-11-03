@@ -16,7 +16,9 @@ prog1 :: String
 prog1 = [r|
 x : int
 
-x = A < D && (exp(jaYfA) && (fc(H)).rRN)
+skip;
+skip;
+skip
 |]
 
 prog2 :: String
@@ -126,63 +128,54 @@ epatterns = [(epat1, e1), (epat2, e2), (epat3, e3), (epat3, e4)]
 patterns :: [String]
 patterns = [pat1, pat2, pat3]
 
+prop_roundtripExpr :: PrettyExpr -> Bool
+prop_roundtripExpr pe@(PrettyExpr e) =
+  let pp = render $ prettyExpr e 0
+  in case (parse parseExpr pp) of
+       Left err -> False
+       Right e' -> e == e'
+
 prop_roundtrip :: PrettyCmd -> Bool
 prop_roundtrip pc@(PrettyCmd c) =
-  let pp = show pc
-      c' = parseCmd . L.alexScanTokens $ pp
-      ppc = show (PrettyCmd c')
-  in ppc == pp
-
-prop_exprEquiv_id :: PrettyExpr -> Bool
-prop_exprEquiv_id (PrettyExpr e) =
-  exprEquiv e e
-
-prop_cmdEquiv_id :: PrettyCmd -> Bool
-prop_cmdEquiv_id (PrettyCmd c) =
-  cmdEquiv c c
-
-unitTests :: IO ()
-unitTests = do
-  forM_ progs $ \p -> do
-    putStrLn "=============="
-    putStrLn p
-    let ast = parseProg . L.alexScanTokens $ p
-    let pp  = render . prettyCmd $ (getCmd ast)
-    putStrLn pp
-    let ast2 = parseCmd . L.alexScanTokens $ pp
-    when (not $ (getCmd ast) `cmdEquiv` ast2) $ do
-      putStrLn "Prettyprinter and parser disagreed!"
-      print (getCmd ast)
-      print ast2
-      exitWith (ExitFailure 1)
-
-  forM_ patterns $ \p -> do
-    putStrLn "--------------"
-    putStrLn p
-    print . parseCmdPattern . PL.alexScanTokens $ p
-
-  forM_ epatterns $ \(p, e) -> do
-    putStrLn "**************"
-    putStrLn p
-    putStrLn e
-    let pp = parseExprPattern . PL.alexScanTokens $ p
-    let pe = parseExpr . L.alexScanTokens $ e
-    print pp
-    print pe
-    print $ matchExpr pp pe M.empty
+  let pp = render . prettyCmd $ c
+  in case (parse parseCmd pp) of
+       Left err -> False
+       Right c' -> normalizeSeq c == c'
 
 isSuccess :: Result -> Bool
 isSuccess (Success _ _ _) = True
 isSuccess _ = False
 
+testprog = [r|
+skip;
+skip;
+skip
+|]
+
 main :: IO ()
 main = do
-  unitTests
+  -- unitTests
   putStrLn ""
   putStrLn "*******************"
   putStrLn "*  QuiCheckTests  *"
   putStrLn "*******************"
-  r <- quickCheckWithResult stdArgs{maxSize=10, maxSuccess=1000} prop_roundtrip
+  r <- quickCheckWithResult
+         stdArgs{maxSize=15, maxSuccess=1000, chatty=True, maxShrinks=100}
+         prop_roundtrip
   when (not $ isSuccess r) $ do
     putStrLn "-------------------"
+    forM_ (failingTestCase r) $ \failedCase -> do
+      case parse parseCmd failedCase of
+        Left err -> putStrLn $ "Parse error: " ++ err
+        Right c -> do
+          let t = show (PrettyCmd c)
+          case parse parseCmd t of
+            Left err -> putStrLn $ "Parse error: " ++ err
+            Right c2 -> do
+              putStr "prop_roundtrip = "
+              print $ prop_roundtrip (PrettyCmd c)
+              putStr "Equivalence testing = "
+              print $ c == c2
+    putStrLn "-------------------"
     print r
+    exitWith (ExitFailure 1)

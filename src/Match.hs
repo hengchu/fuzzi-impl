@@ -3,7 +3,6 @@
 module Match where
 
 import Syntax
-import Data.Monoid
 import qualified Data.Set as S
 import qualified Data.Map as M
 
@@ -17,6 +16,9 @@ data UniError = UniError { getUniError :: M.Map Var (S.Set UniResult) }
   deriving (Show, Eq)
 
 type UniEnv = M.Map Var UniResult
+
+instance Semigroup UniError where
+  (<>) (UniError x) (UniError y) = UniError $ M.unionWith S.union x y
 
 instance Monoid UniError where
   mempty = UniError M.empty

@@ -9,7 +9,7 @@ import Prelude hiding (LT, EQ, GT)
 import Data.Generics.Product
 import Test.QuickCheck
 
-type Rec = Map String Tau
+type RecordTy = Map String Tau
 
 data Tau = TInt
          | TFloat
@@ -17,7 +17,7 @@ data Tau = TInt
          | TAny
          | TArr Tau (Maybe Int)
          | TBag Tau
-         | TRec Rec
+         | TRec RecordTy
          deriving (Show, Eq)
 
 data Binop = LT | LE | GT | GE | AND | OR | EQ | NEQ | PLUS | MINUS | MULT | DIV
@@ -30,27 +30,14 @@ data Lit = LInt Int
          | LBag [Expr]
   deriving (Show, Eq, Ord)
 
-litEquiv :: Lit -> Lit -> Bool
-litEquiv (LInt i) (LInt i') = i == i'
-litEquiv (LFloat f) (LFloat f') = f == f'
-litEquiv (LBool b) (LBool b') = b == b'
-litEquiv (LArr es) (LArr es') =
-  exprsEquiv es es'
-litEquiv (LBag es) (LBag es') =
-  exprsEquiv es es'
-litEquiv _ _ = False
-
-exprsEquiv :: [Expr] -> [Expr] -> Bool
-exprsEquiv [] [] = True
-exprsEquiv (e:es) (e':es') =
-  exprEquiv e e' && exprsEquiv es es'
-exprsEquiv _ _ = False
-
 type Line   = Int
 type Column = Int
 
 data Position = Position Line Column
-  deriving (Show, Eq, Ord)
+  deriving (Show, Ord)
+
+instance Eq Position where
+  _ == _ = True
 
 type Var = String
 
@@ -72,31 +59,7 @@ data Expr = EVar     Position Var
           | EDot     Position
                      Expr     -- ^Vector
                      Expr     -- ^Vector
-  deriving (Generic, Show, Ord)
-
-exprEquiv :: Expr -> Expr -> Bool
-exprEquiv (EVar _ x) (EVar _ x') = x == x'
-exprEquiv (ELength _ e) (ELength _ e') = exprEquiv e e'
-exprEquiv (ELit _ lit) (ELit _ lit') = litEquiv lit lit'
-exprEquiv (EBinop _ e1 op e2) (EBinop _ e1' op' e2') =
-  exprEquiv e1 e1' && op == op' && exprEquiv e2 e2'
-exprEquiv (EIndex _ e1 e2) (EIndex _ e1' e2') =
-  exprEquiv e1 e1' && exprEquiv e2 e2'
-exprEquiv (ERAccess _ e label) (ERAccess _ e' label') =
-  exprEquiv e e' && label == label'
-exprEquiv (EFloat _ e) (EFloat _ e') =
-  exprEquiv e e'
-exprEquiv (EExp _ e) (EExp _ e') =
-  exprEquiv e e'
-exprEquiv (ELog _ e) (ELog _ e') =
-  exprEquiv e e'
-exprEquiv (EClip _ e lit) (EClip _ e' lit') =
-  exprEquiv e e' && litEquiv lit lit'
-exprEquiv (EScale _ e1 e2) (EScale _ e1' e2') =
-  exprEquiv e1 e1' && exprEquiv e2 e2'
-exprEquiv (EDot _ e1 e2) (EDot _ e1' e2') =
-  exprEquiv e1 e1' && exprEquiv e2 e2'
-exprEquiv _ _ = False
+  deriving (Generic, Show, Eq, Ord)
 
 data AtomPattern a = AtomExact a
                    | AtomWild Var
@@ -131,9 +94,6 @@ data ExprPattern = EPWild    Position Var
                  | EPDot     Position ExprPattern ExprPattern
                  deriving (Show, Eq, Generic)
 
-instance Eq Expr where
-  (==) = exprEquiv
-
 exprPosn :: Expr -> Position
 exprPosn e = e ^. (typed @Position)
 
@@ -152,14 +112,6 @@ data Param = PExpr Expr
            | PCmd  Cmd
   deriving (Show, Eq, Ord)
 
-paramsEquiv :: [Param] -> [Param] -> Bool
-paramsEquiv [] [] = True
-paramsEquiv ((PExpr e) : xs) ((PExpr e') : ys) =
-  exprEquiv e e' && paramsEquiv xs ys
-paramsEquiv ((PCmd c) : xs) ((PCmd c') : ys) =
-  cmdEquiv c c' && paramsEquiv xs ys
-paramsEquiv _ _ = False
-
 data Cmd = CAssign       Position Expr   Expr
          | CLaplace      Position Var    Float Expr
          | CIf           Position Expr   Cmd   Cmd
@@ -167,10 +119,24 @@ data Cmd = CAssign       Position Expr   Expr
          | CSeq          Position Cmd    Cmd
          | CSkip         Position
          | CExt          Position String [Param]
-  deriving (Generic, Show, Ord)
+  deriving (Generic, Show, Eq, Ord)
 
-instance Eq Cmd where
-  (==) = cmdEquiv
+-- Turn CSeqs into a linked list, flattening all tree structures
+normalizeSeq :: Cmd -> Cmd
+normalizeSeq (CSeq p (CSeq p' c1 c2) c3) =
+  normalizeSeq $ CSeq p c1 (CSeq p' c2 c3)
+normalizeSeq (CSeq p c1 c2) =
+  CSeq p (normalizeSeq c1) (normalizeSeq c2)
+normalizeSeq (CIf p e c1 c2) =
+  CIf p e (normalizeSeq c1) (normalizeSeq c2)
+normalizeSeq (CWhile p e c) =
+  CWhile p e $ normalizeSeq c
+normalizeSeq (CExt p name params) = (CExt p name (fmap normalizeParam params))
+normalizeSeq c = c
+
+normalizeParam :: Param -> Param
+normalizeParam (PCmd c) = PCmd $ normalizeSeq c
+normalizeParam p = p
 
 data CmdPattern = CPWild    Position Var
                 | CPAssign  Position ExprPattern ExprPattern
@@ -183,23 +149,6 @@ data CmdPattern = CPWild    Position Var
 
 cmdPosn :: Cmd -> Position
 cmdPosn c = c ^. typed @Position
-
--- |Equivalence of syntax up to position
-cmdEquiv :: Cmd -> Cmd -> Bool
-cmdEquiv (CAssign _ e1 e2) (CAssign _ e1' e2') =
-  exprEquiv e1 e1' && exprEquiv e2 e2'
-cmdEquiv (CLaplace _ x f e) (CLaplace _ x' f' e') =
-  x == x' && f == f' && exprEquiv e e'
-cmdEquiv (CIf _ e c1 c2) (CIf _ e' c1' c2') =
-  exprEquiv e e' && cmdEquiv c1 c1' && cmdEquiv c2 c2'
-cmdEquiv (CWhile _ e c) (CWhile _ e' c') =
-  exprEquiv e e' && cmdEquiv c c'
-cmdEquiv (CSeq _ c1 c2) (CSeq _ c1' c2') =
-  cmdEquiv c1 c1' && cmdEquiv c2 c2'
-cmdEquiv (CSkip _) (CSkip _) = True
-cmdEquiv (CExt _ name params) (CExt _ name' params') =
-  name == name' && paramsEquiv params params'
-cmdEquiv _ _ = False
 
 trivialPosition :: Position
 trivialPosition = Position 0 0
@@ -320,21 +269,21 @@ genCmdSized sz
 
 shrinkCmd :: Cmd -> [Cmd]
 shrinkCmd (CAssign _ e1 e2) =
-  (CSkip trivialPosition) : [CAssign trivialPosition e1' e2'
-  | e1' <- shrink e1, e2' <- shrink e2]
+  [CAssign trivialPosition e1' e2'
+  | e1' <- shrinkExpr e1, e2' <- shrinkExpr e2] ++ [CSkip trivialPosition]
 shrinkCmd (CLaplace _ x f e) =
-  (CSkip trivialPosition) : [CLaplace trivialPosition x' f' e'
-  | x' <- shrink x, f' <- shrink f, e' <- shrink e]
+  [CLaplace trivialPosition x f' e'
+  | f' <- shrink f, e' <- shrink e] ++ [CSkip trivialPosition]
 shrinkCmd (CIf _ e c1 c2) =
-  c1 : c2 : [CIf trivialPosition e' c1' c2'
-  | e' <- shrink e, c1' <- shrinkCmd c1, c2' <- shrinkCmd c2]
+  [CIf trivialPosition e' c1' c2'
+  | e' <- shrink e, c1' <- shrinkCmd c1, c2' <- shrinkCmd c2] ++ [c1, c2]
 shrinkCmd (CWhile _ e c) =
-  c : [CWhile trivialPosition e' c'
-  | e' <- shrink e, c' <- shrinkCmd c]
+  [CWhile trivialPosition e' c'
+  | e' <- shrink e, c' <- shrinkCmd c] ++ [c]
 shrinkCmd (CSeq _ c1 c2) =
-  c1 : c2 : [CSeq trivialPosition c1' c2'
+  [c1, c2] ++ [CSeq trivialPosition c1' c2'
   | c1' <- shrinkCmd c1, c2' <- shrinkCmd c2]
-shrinkCmd (CSkip _) = []
+shrinkCmd (CSkip _) = [CSkip trivialPosition]
 shrinkCmd (CExt _ name params) =
   [CExt trivialPosition name params' | params' <- shrink params]
 
@@ -351,44 +300,43 @@ shrinkLit (LBag es) =
   LBag <$> shrink es
 
 shrinkExpr :: Expr -> [Expr]
-shrinkExpr (EVar _ _) = []
+shrinkExpr (EVar _ x) = [EVar trivialPosition x]
 shrinkExpr (ELength _ e) =
   let e' = shrinkExpr e
-  in e' ++ (fmap (ELength trivialPosition) e')
+  in (fmap (ELength trivialPosition) e') ++ e'
 shrinkExpr (ELit _ lit) =
   fmap (ELit trivialPosition) (shrinkLit lit)
 shrinkExpr (EBinop _ e1 op e2) =
   let e1' = shrinkExpr e1
       e2' = shrinkExpr e2
-  in e1' ++ e2' ++ [EBinop trivialPosition lhs op rhs | lhs <- e1', rhs <- e2']
+  in [EBinop trivialPosition lhs op rhs | lhs <- e1', rhs <- e2'] ++ e1' ++ e2'
 shrinkExpr (EIndex _ e1 e2) =
   let e1' = shrinkExpr e1
       e2' = shrinkExpr e2
-  in e1' ++ e2' ++ [EIndex trivialPosition lhs rhs | lhs <- e1', rhs <- e2']
+  in [EIndex trivialPosition lhs rhs | lhs <- e1', rhs <- e2'] ++ e1' ++ e2'
 shrinkExpr (ERAccess _ e label) =
   let e' = shrinkExpr e
-      label' = shrink label
-  in e' ++ [ERAccess trivialPosition r l | r <- e', l <- label']
+  in [ERAccess trivialPosition r label | r <- e'] ++ e'
 shrinkExpr (EFloat _ e) =
   let e' = shrinkExpr e
-  in e' ++ fmap (EFloat trivialPosition) e'
+  in fmap (EFloat trivialPosition) e' ++ e'
 shrinkExpr (EExp _ e) =
   let e' = shrinkExpr e
-  in e' ++ fmap (EExp trivialPosition) e'
+  in fmap (EExp trivialPosition) e' ++ e'
 shrinkExpr (ELog _ e) =
   let e' = shrinkExpr e
-  in e' ++ fmap (ELog trivialPosition) e'
+  in fmap (ELog trivialPosition) e' ++ e'
 shrinkExpr (EClip _ e lit) =
   let e' = shrinkExpr e
-  in e' ++ [EClip trivialPosition e1 lit' | e1 <- e', lit' <- shrinkLit lit]
+  in [EClip trivialPosition e1 lit' | e1 <- e', lit' <- shrinkLit lit] ++ e'
 shrinkExpr (EScale _ e1 e2) =
   let e1' = shrinkExpr e1
       e2' = shrinkExpr e2
-  in e1' ++ e2' ++ [EScale trivialPosition lhs rhs | lhs <- e1', rhs <- e2']
+  in [EScale trivialPosition lhs rhs | lhs <- e1', rhs <- e2'] ++ e1' ++ e2'
 shrinkExpr (EDot _ e1 e2) =
   let e1' = shrinkExpr e1
       e2' = shrinkExpr e2
-  in e1' ++ e2' ++ [EDot trivialPosition lhs rhs | lhs <- e1', rhs <- e2']
+  in [EDot trivialPosition lhs rhs | lhs <- e1', rhs <- e2'] ++ e1' ++ e2'
 
 instance Arbitrary Param where
   arbitrary = sized genParamSized

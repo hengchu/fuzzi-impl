@@ -13,6 +13,7 @@ import Prelude hiding (LT, GT, EQ)
 %name      parseExpr Expr
 %tokentype { Token }
 %error     { parseError }
+%monad     { Parser } { bindP } { returnP }
 
 %token
   ident     { TIdent _ _ }
@@ -75,27 +76,36 @@ import Prelude hiding (LT, GT, EQ)
 %%
 
 RecTyPair
-  : ident ':' Ty                              { (getIdent $1, $3) }
+  : ident ':' Ty                              {% getIdent $1 `bindP` \ident ->
+                                                 returnP (ident, $3)
+                                              }
 
 RecTyPairs
   : RecTyPair                                 { [$1] }
   | RecTyPair ',' RecTyPairs                  { $1 : $3 }
 
 Ty
-  : ident                                     { case getIdent $1 of
-                                                  "int" -> S.TInt
-                                                  "float" -> S.TFloat
-                                                  "bool" -> S.TBool
-                                                  x -> error $ "Unknown type: " ++ x
+  : ident                                     {% getIdent $1 `bindP` \ident ->
+                                                 case ident of
+                                                   "int" -> returnP S.TInt
+                                                   "float" -> returnP S.TFloat
+                                                   "bool" -> returnP S.TBool
+                                                   x -> failWithMsg $ "Unknown type: " ++ show x
                                               }
-  | '[' Ty '(' int ')' ']'                    { S.TArr $2 (Just $ getInt $4) }
+  | '[' Ty '(' int ')' ']'                    {% getInt $4 `bindP` \i ->
+                                                 returnP $ S.TArr $2 (Just i) }
   | '[' Ty ']'                                { S.TArr $2 Nothing }
   | '{' Ty '}'                                { S.TBag $2 }
   | '{' RecTyPairs '}'                        { S.TRec . fromList $ $2 }
 
 Decl
-  : ident ':' Ty                          { [Decl (token2Position $1) (getIdent $1) 0.0 $3] }
-  | ident ':' '[' float ']' Ty            { [Decl (token2Position $1) (getIdent $1) (getFloat $4) $6] }
+  : ident ':' Ty                          {% getIdent $1 `bindP` \ident ->
+                                             returnP [Decl (token2Position $1) ident 0.0 $3]
+                                          }
+  | ident ':' '[' float ']' Ty            {% getIdent $1 `bindP` \ident ->
+                                             getFloat $4 `bindP` \f ->
+                                             returnP [Decl (token2Position $1) ident f $6]
+                                          }
   | Decl ';' Decl                             { $1 ++ $3 }
 
 Prog
@@ -104,29 +114,37 @@ Prog
 Cmd
   : skip                                      { CSkip    (token2Position $1) }
   | Expr '=' Expr                             { CAssign (token2Position $2) $1 $3 }
-  | ident '$=' laplace '(' float ',' Expr ')' { CLaplace (token2Position $2)
-                                                         (getIdent $1)
-                                                         (getFloat $5)
-                                                         $7
+  | ident '$=' laplace '(' float ',' Expr ')' {% getIdent $1 `bindP` \ident ->
+                                                 getFloat $5 `bindP` \f ->
+                                                 returnP $ CLaplace (token2Position $2)
+                                                                    ident
+                                                                    f
+                                                                    $7
                                               }
   | if Expr then Cmd else Cmd end             { CIf      (token2Position $1) $2 $4 $6 }
   | while Expr do Cmd end                     { CWhile   (token2Position $1) $2 $4 }
   | Cmd ';'                                   { $1 }
   | Cmd ';' Cmd                               { CSeq     (token2Position $2) $1 $3 }
-  | ident '(' ExtensionParams ')'             { CExt (token2Position $1) (getIdent $1) $3 }
+  | ident '(' ExtensionParams ')'             {% getIdent $1 `bindP` \ident ->
+                                                 returnP $ CExt (token2Position $1) ident $3 }
 
 Literal
-  : int                                      { (token2Position $1, LInt (getInt $1)) }
-  | '-' int %prec ATOM                       { (token2Position $1, LInt (-(getInt $2))) }
-  | float                                    { (token2Position $1, LFloat (getFloat $1)) }
-  | '-' float %prec ATOM                     { (token2Position $1, LFloat (-(getFloat $2))) }
+  : int                                      {% getInt $1 `bindP` \i ->
+                                                returnP $ (token2Position $1, LInt i) }
+  | '-' int %prec ATOM                       {% getInt $2 `bindP` \i ->
+                                                returnP $ (token2Position $1, LInt (-i)) }
+  | float                                    {% getFloat $1 `bindP` \f ->
+                                                returnP $ (token2Position $1, LFloat f) }
+  | '-' float %prec ATOM                     {% getFloat $2 `bindP` \f ->
+                                                returnP $ (token2Position $1, LFloat (-f)) }
   | true                                     { (token2Position $1, LBool True) }
   | false                                    { (token2Position $1, LBool False) }
   | '[' ManyExprs ']'                        { (token2Position $1, LArr $2) }
   | '{' ManyExprs '}'                        { (token2Position $1, LBag $2) }
 
 AtomExpr
-: ident                     {EVar (token2Position $1) (getIdent $1)}
+: ident                     {% getIdent $1 `bindP` \ident ->
+                               returnP $ EVar (token2Position $1) ident}
 | Literal                   {ELit (fst $1) (snd $1)}
 | '(' Expr ')'              {$2}
 
@@ -150,7 +168,8 @@ Expr
   | Expr '!=' Expr                           { EBinop (token2Position $2) $1 NEQ   $3 }
   | Expr '&&' Expr                           { EBinop (token2Position $2) $1 AND   $3 }
   | Expr '||' Expr                           { EBinop (token2Position $2) $1 OR    $3 }
-  | AtomExpr '.' ident                       { ERAccess (token2Position $2) $1 (getIdent $3) }
+  | AtomExpr '.' ident                       {% getIdent $3 `bindP` \ident ->
+                                                returnP $ ERAccess (token2Position $2) $1 ident }
   | fcast '(' Expr ')'                       { EFloat (token2Position $1) $3 }
   | log '(' Expr ')'                         { ELog (token2Position $1) $3 }
   | exp '(' Expr ')'                         { EExp (token2Position $1) $3 }
@@ -171,25 +190,47 @@ ExtensionParams
 | ExtensionParam ',' ExtensionParams { $1 : $3 }
 
 ManyExprs
-  :                    { [] }
-  | Expr               { [$1]    }
-  | Expr ',' ManyExprs { $1 : $3 }
+:                    { [] }
+| Expr               { [$1]    }
+| Expr ',' ManyExprs { $1 : $3 }
 
 {
-parseError :: [Token] -> a
-parseError (tok : _) = error $ "Unexpected token: " ++ show tok
+newtype Parser a = Parser { runParser :: Either String a }
+
+returnP :: a -> Parser a
+returnP a = Parser . Right $ a
+
+bindP :: Parser a -> (a -> Parser b) -> Parser b
+bindP (Parser pa) f =
+  case pa of
+    Left err -> Parser . Left $ err
+    Right a  -> f a
+
+failWithMsg :: String -> Parser a
+failWithMsg msg = Parser . Left $ msg
+
+parseError :: [Token] -> Parser a
+parseError (tok : _) = failWithMsg $ "Unexpected token: " ++ show tok
 
 token2Position :: Token -> Position
 token2Position tok =
   let AlexPn _ line col = getAlexPosn tok
   in Position line col
 
-getIdent (TIdent _ x) = x
-getIdent _ = error "Expecting an TIdent"
+getIdent :: Token -> Parser String
+getIdent (TIdent _ x) = returnP x
+getIdent t = failWithMsg $ "Expecting an TIdent, position = " ++ show (getAlexPosn t)
 
-getInt (TInt _ v) = v
-getInt _ = error "Expecting an TInt"
+getInt :: Token -> Parser Int
+getInt (TInt _ v) = returnP v
+getInt t = failWithMsg $ "Expecting an TInt, position = " ++ show (getAlexPosn t)
 
-getFloat (TFloat _ v) = v
-getFloat _ = error "Expecting an TFloat"
+getFloat :: Token -> Parser Float
+getFloat (TFloat _ v) = returnP v
+getFloat t = failWithMsg $ "Expecting an TFloat, position = " ++ show (getAlexPosn t)
+
+parse :: ([Token] -> Parser a) -> String -> Either String a
+parse p input = do
+  tokens <- runAlex input scanTokens
+  runParser $ p tokens
 }
