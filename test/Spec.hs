@@ -1,16 +1,18 @@
 import qualified Lexer        as L
 import qualified PatternLexer as PL
-import Parser
-import PatternParser
+import qualified Parser       as P
+import qualified PatternParser as PP
 import Syntax
 import Pretty
 import Match
 import Test.QuickCheck
+import Test.QuickCheck.Test
 import Text.RawString.QQ
 import qualified Data.Map as M
 
 import Control.Monad
 import System.Exit
+import Debug.Trace
 
 prog1 :: String
 prog1 = [r|
@@ -131,51 +133,42 @@ patterns = [pat1, pat2, pat3]
 prop_roundtripExpr :: PrettyExpr -> Bool
 prop_roundtripExpr pe@(PrettyExpr e) =
   let pp = render $ prettyExpr e 0
-  in case (parse parseExpr pp) of
+  in case (P.parse P.parseExpr pp) of
+       Left err -> False
+       Right e' -> e == e'
+
+prop_roundtripExprPattern :: PrettyExprPattern -> Bool
+prop_roundtripExprPattern pe@(PrettyExprPattern e) =
+  let pp = render $ prettyExprPattern e 0
+  in case (PP.parse PP.parseExprPattern pp) of
        Left err -> False
        Right e' -> e == e'
 
 prop_roundtrip :: PrettyCmd -> Bool
 prop_roundtrip pc@(PrettyCmd c) =
   let pp = render . prettyCmd $ c
-  in case (parse parseCmd pp) of
+  in case (P.parse P.parseCmd pp) of
        Left err -> False
        Right c' -> normalizeSeq c == c'
 
-isSuccess :: Result -> Bool
-isSuccess (Success _ _ _) = True
-isSuccess _ = False
-
-testprog = [r|
-skip;
-skip;
-skip
-|]
+prop_roundtripPattern :: PrettyCmdPattern -> Bool
+prop_roundtripPattern pc@(PrettyCmdPattern c) =
+  let pp = render . prettyCmdPattern $ c
+  in case (PP.parse PP.parseCmdPattern pp) of
+       Left err -> False
+       Right c' -> normalizeSeqPattern c == c'
 
 main :: IO ()
 main = do
   -- unitTests
   putStrLn ""
-  putStrLn "*******************"
-  putStrLn "*  QuiCheckTests  *"
-  putStrLn "*******************"
-  r <- quickCheckWithResult
-         stdArgs{maxSize=15, maxSuccess=1000, chatty=True, maxShrinks=100}
-         prop_roundtrip
-  when (not $ isSuccess r) $ do
-    putStrLn "-------------------"
-    forM_ (failingTestCase r) $ \failedCase -> do
-      case parse parseCmd failedCase of
-        Left err -> putStrLn $ "Parse error: " ++ err
-        Right c -> do
-          let t = show (PrettyCmd c)
-          case parse parseCmd t of
-            Left err -> putStrLn $ "Parse error: " ++ err
-            Right c2 -> do
-              putStr "prop_roundtrip = "
-              print $ prop_roundtrip (PrettyCmd c)
-              putStr "Equivalence testing = "
-              print $ c == c2
-    putStrLn "-------------------"
-    print r
-    exitWith (ExitFailure 1)
+  putStrLn "*********************"
+  putStrLn "*  QuickCheckTests  *"
+  putStrLn "*********************"
+  let args = stdArgs{maxSize=15, maxSuccess=500, chatty=True, maxShrinks=100}
+  r <- quickCheckWithResult args
+       $ prop_roundtrip
+       .&&. prop_roundtripExpr
+       .&&. prop_roundtripPattern
+       .&&. prop_roundtripExprPattern
+  unless (isSuccess r) exitFailure

@@ -210,6 +210,7 @@ failWithMsg :: String -> Parser a
 failWithMsg msg = Parser . Left $ msg
 
 parseError :: [Token] -> Parser a
+parseError [] = failWithMsg "Expecting more tokens, but none are left"
 parseError (tok : _) = failWithMsg $ "Unexpected token: " ++ show tok
 
 token2Position :: Token -> Position

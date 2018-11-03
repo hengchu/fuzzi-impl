@@ -80,6 +80,7 @@ library
                    , ViewPatterns
                    , LambdaCase
                    , GeneralizedNewtypeDeriving
+                   , TypeFamilies
 
 executable fuzzi
   main-is: Main.hs

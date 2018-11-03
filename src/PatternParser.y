@@ -12,6 +12,7 @@ import Prelude hiding (LT, GT, EQ)
 %name      parseExprPattern Expr
 %tokentype { Token }
 %error     { parseError }
+%monad     { Parser } { bindP } { returnP }
 
 %token
   ident     { TIdent _ _ }
@@ -61,6 +62,7 @@ import Prelude hiding (LT, GT, EQ)
   vescape   { TVarEscape _ }
   intescape { TIntEscape _ }
   floatescape { TFloatEscape _ }
+  boolescape { TBoolEscape _ }
   exprescape { TExprEscape _ }
   cmdescape { TCmdEscape _ }
 
@@ -79,19 +81,38 @@ import Prelude hiding (LT, GT, EQ)
 %%
 
 IntPat
-: int { (token2Position $1, (AtomExact . getInt $ $1)) }
-| intescape '(' ident ')' { (token2Position $1, (AtomWild . getIdent $ $3)) }
+: int
+  {% getInt $1 `bindP` \i -> returnP (token2Position $1, AtomExact i) }
+| '-' int %prec ATOM
+  {% getInt $2 `bindP` \i -> returnP (token2Position $1, AtomExact (-i)) }
+| intescape '(' ident ')'
+  {% getIdent $3 `bindP` \ident -> returnP (token2Position $1, AtomWild ident) }
 
 FloatPat
-: float { (token2Position $1, (AtomExact . getFloat $ $1)) }
-| floatescape '(' ident ')' { (token2Position $1, (AtomWild . getIdent $ $3)) }
+: float
+  {% getFloat $1 `bindP` \f -> returnP (token2Position $1, AtomExact f) }
+| '-' float %prec ATOM
+  {% getFloat $2 `bindP` \f -> returnP (token2Position $1, AtomExact (-f))}
+| floatescape '(' ident ')'
+  {% getIdent $3 `bindP` \ident -> returnP (token2Position $1, AtomWild ident) }
+
+BoolPat
+: true
+{ (token2Position $1, AtomExact True) }
+| false
+{ (token2Position $1, AtomExact False) }
+| boolescape '(' ident ')'
+{% getIdent $3 `bindP` \ident -> returnP (token2Position $1, AtomWild ident) }
 
 VarPat
-: ident { (token2Position $1, (AtomExact . getIdent $ $1)) }
-| vescape '(' ident ')' { (token2Position $1, (AtomWild . getIdent $ $3))  }
+: ident
+  {% getIdent $1 `bindP` \ident -> returnP (token2Position $1, AtomExact ident) }
+| vescape '(' ident ')'
+  {% getIdent $3 `bindP` \ident -> returnP (token2Position $1, AtomWild ident)  }
 
 Cmd
-  : cmdescape '(' ident ')'                   { CPWild (token2Position $1) (getIdent $3) }
+  : cmdescape '(' ident ')'
+    {% getIdent $3 `bindP` \ident -> returnP $ CPWild (token2Position $1) ident }
   | skip                                      { CPSkip (token2Position $1) }
   | Expr '=' Expr                             { CPAssign (token2Position $2) $1 $3 }
   | VarPat '$=' laplace '(' FloatPat ',' Expr ')' { CPLaplace (token2Position $2)
@@ -103,10 +124,27 @@ Cmd
   | while Expr do Cmd end                     { CPWhile   (token2Position $1) $2 $4 }
   | Cmd ';'                                   { $1 }
   | Cmd ';' Cmd                               { CPSeq     (token2Position $2) $1 $3 }
+  | ident '(' ExtensionParams ')'
+  {% getIdent $1 `bindP` \ident ->
+     returnP $ CPExt (token2Position $1) ident $3
+  }
+
+CmdBlock
+: '{' Cmd '}' { $2 }
+
+ExtensionParam
+: Expr     { PPExpr $1 }
+| CmdBlock { PPCmd $1  }
+
+ExtensionParams
+:                { [] }
+| ExtensionParam { [$1] }
+| ExtensionParam ',' ExtensionParams { $1 : $3 }
 
 Literal
 : IntPat                                   { (fst $1, LPInt . snd $ $1) }
 | FloatPat                                 { (fst $1, LPFloat . snd $ $1) }
+| BoolPat                                  { (fst $1, LPBool . snd $ $1 ) }
 | '[' ManyExprs ']'                        { (token2Position $1, LPArr $2) }
 | '{' ManyExprs '}'                        { (token2Position $1, LPBag $2) }
 
@@ -120,7 +158,8 @@ IndexExpr
 | IndexExpr '[' Expr ']'    {EPIndex (token2Position $2) $1 $3}
 
 Expr
-  : exprescape '(' ident ')'                 { EPWild (token2Position $1) (getIdent $3) }
+  : exprescape '(' ident ')'
+  {% getIdent $3 `bindP` \ident -> returnP $ EPWild (token2Position $1) ident }
   | AtomExpr                                 { $1 }
   | IndexExpr                                { $1 }
   | length '(' Expr ')'                      { EPLength (token2Position $1) $3 }
@@ -136,32 +175,58 @@ Expr
   | Expr '!=' Expr                           { EPBinop (token2Position $2) $1 NEQ   $3 }
   | Expr '&&' Expr                           { EPBinop (token2Position $2) $1 AND   $3 }
   | Expr '||' Expr                           { EPBinop (token2Position $2) $1 OR    $3 }
-  | Expr '.' ident                           { EPRAccess (token2Position $2) $1 (getIdent $3) }
+  | AtomExpr '.' ident
+  {% getIdent $3 `bindP` \ident -> returnP $ EPRAccess (token2Position $2) $1 ident }
   | fcast '(' Expr ')'                       { EPFloat (token2Position $1) $3 }
   | log '(' Expr ')'                         { EPLog (token2Position $1) $3 }
   | exp '(' Expr ')'                         { EPExp (token2Position $1) $3 }
   | scale '(' Expr ',' Expr ')'              { EPScale (token2Position $1) $3 $5 }
   | dot '(' Expr ',' Expr ')'                { EPDot (token2Position $1) $3 $5 }
+  | clip '(' Expr ',' Literal ')'            { EPClip (token2Position $1) $3 (snd $5) }
 
 ManyExprs
-  : Expr               { [$1]    }
+  :                    { [] }
+  | Expr               { [$1]    }
   | Expr ',' ManyExprs { $1 : $3 }
 
 {
-parseError :: [Token] -> a
-parseError (tok : _) = error $ "Unexpected token: " ++ show tok
+newtype Parser a = Parser { runParser :: Either String a }
+
+returnP :: a -> Parser a
+returnP a = Parser . Right $ a
+
+bindP :: Parser a -> (a -> Parser b) -> Parser b
+bindP (Parser pa) f =
+  case pa of
+    Left err -> Parser . Left $ err
+    Right a  -> f a
+
+failWithMsg :: String -> Parser a
+failWithMsg msg = Parser . Left $ msg
+
+parseError :: [Token] -> Parser a
+parseError [] = failWithMsg "Expecting more tokens, but none are left"
+parseError (tok : _) = failWithMsg $ "Unexpected token: " ++ show tok
 
 token2Position :: Token -> Position
 token2Position tok =
   let AlexPn _ line col = getAlexPosn tok
   in Position line col
 
-getIdent (TIdent _ x) = x
-getIdent _ = error "Expecting an TIdent"
+getIdent :: Token -> Parser String
+getIdent (TIdent _ x) = returnP x
+getIdent t = failWithMsg $ "Expecting an TIdent, position = " ++ show (getAlexPosn t)
 
-getInt (TInt _ v) = v
-getInt _ = error "Expecting an TInt"
+getInt :: Token -> Parser Int
+getInt (TInt _ v) = returnP v
+getInt t = failWithMsg $ "Expecting an TInt, position = " ++ show (getAlexPosn t)
 
-getFloat (TFloat _ v) = v
-getFloat _ = error "Expecting an TFloat"
+getFloat :: Token -> Parser Float
+getFloat (TFloat _ v) = returnP v
+getFloat t = failWithMsg $ "Expecting an TFloat, position = " ++ show (getAlexPosn t)
+
+parse :: ([Token] -> Parser a) -> String -> Either String a
+parse p input = do
+  tokens <- runAlex input scanTokens
+  runParser $ p tokens
 }

@@ -5,9 +5,13 @@
 module Pretty (
   prettyCmd
   , prettyExpr
+  , prettyCmdPattern
+  , prettyExprPattern
   , Pretty.render
   , PrettyCmd(..)
   , PrettyExpr(..)
+  , PrettyCmdPattern(..)
+  , PrettyExprPattern(..)
   ) where
 
 import Data.Map hiding (foldr)
@@ -66,6 +70,22 @@ concatWith _ [] = mempty
 concatWith _ (x:[]) = x
 concatWith sep (x:xs) = x <> sep <> concatWith sep xs
 
+prettyVarPattern :: VarPattern -> Doc
+prettyVarPattern (AtomExact x) = text x
+prettyVarPattern (AtomWild x) = text "v" <> (parens $ text x)
+
+prettyIntPattern :: IntPattern -> Doc
+prettyIntPattern (AtomExact x) = int x
+prettyIntPattern (AtomWild x) = text "iesc" <> (parens $ text x)
+
+prettyFloatPattern :: FloatPattern -> Doc
+prettyFloatPattern (AtomExact x) = float x
+prettyFloatPattern (AtomWild x) = text "fesc" <> (parens $ text x)
+
+prettyBoolPattern :: BoolPattern -> Doc
+prettyBoolPattern (AtomExact x) = if x then text "true" else text "false"
+prettyBoolPattern (AtomWild x) = text "besc" <> (parens $ text x)
+
 prettyLit :: Lit -> Doc
 prettyLit (LInt i) = int i
 prettyLit (LFloat f) = float f
@@ -74,6 +94,15 @@ prettyLit (LArr es) =
   brackets $ concatWith (comma <> text " ") $ fmap (flip prettyExpr 0) es
 prettyLit (LBag es) =
   braces $ concatWith (comma <> text " ") $ fmap (flip prettyExpr 0) es
+
+prettyLitPattern :: LitPattern -> Doc
+prettyLitPattern (LPInt i) = prettyIntPattern i
+prettyLitPattern (LPFloat f) = prettyFloatPattern f
+prettyLitPattern (LPBool b) = prettyBoolPattern b
+prettyLitPattern (LPArr es) =
+  brackets $ concatWith (comma <> text " ") $ fmap (flip prettyExprPattern 0) es
+prettyLitPattern (LPBag es) =
+  braces $ concatWith (comma <> text " ") $ fmap (flip prettyExprPattern 0) es
 
 prettyExpr :: Expr -> Int -> Doc
 prettyExpr (EVar _ x)    _ = text x
@@ -101,6 +130,35 @@ prettyExpr (EScale _ e1 e2) _ =
 prettyExpr (EDot _ e1 e2) _ =
   text "dot" <> (parens $ prettyExpr e1 0 <> comma <+> prettyExpr e2 0)
 
+prettyExprPattern :: ExprPattern -> Int -> Doc
+prettyExprPattern (EPWild _ x) _ = text "e" <> (parens $ text x)
+prettyExprPattern (EPVar _ vp) _ = prettyVarPattern vp
+prettyExprPattern (EPLength _ e) _ = text "length" <> (parens $ prettyExprPattern e 0)
+prettyExprPattern (EPLit _ lit) _ = prettyLitPattern lit
+prettyExprPattern (EPBinop _ e1 op e2) p =
+  let opPrec = getPrecedence op
+      opFixity = getFixity op
+  in parensIf (p > opPrec)
+       $ (prettyExprPattern e1 opPrec)
+         <+> opDoc ! op
+         <+> (prettyExprPattern e2 (opPrec + opFixity))
+prettyExprPattern (EPIndex _ e1 e2) _ =
+  (parens $ prettyExprPattern e1 0) <> lbrack <> prettyExprPattern e2 0 <> rbrack
+prettyExprPattern (EPRAccess _ e label) _ =
+  (parens $ prettyExprPattern e 0) <> text "." <> text label
+prettyExprPattern (EPFloat _ e) _ =
+  text "fc" <> (parens $ prettyExprPattern e 0)
+prettyExprPattern (EPExp _ e) _ =
+  text "exp" <> (parens $ prettyExprPattern e 0)
+prettyExprPattern (EPLog _ e) _ =
+  text "log" <> (parens $ prettyExprPattern e 0)
+prettyExprPattern (EPClip _ e lit) _ =
+  text "clip" <> (parens $ prettyExprPattern e 0 <> comma <+> prettyLitPattern lit)
+prettyExprPattern (EPScale _ e1 e2) _ =
+  text "scale" <> (parens $ prettyExprPattern e1 0 <> comma <+> prettyExprPattern e2 0)
+prettyExprPattern (EPDot _ e1 e2) _ =
+  text "dot" <> (parens $ prettyExprPattern e1 0 <> comma <+> prettyExprPattern e2 0)
+
 prettyParam :: Param -> Doc
 prettyParam (PExpr e) = prettyExpr e 0
 prettyParam (PCmd c) =
@@ -110,9 +168,22 @@ prettyParam (PCmd c) =
   , rbrace
   ]
 
+prettyParamPattern :: ParamPattern -> Doc
+prettyParamPattern (PPExpr e) = prettyExprPattern e 0
+prettyParamPattern (PPCmd c) =
+  vcat [
+  lbrace
+  , nest 2 $ prettyCmdPattern c
+  , rbrace
+  ]
+
 prettyParams :: [Param] -> Doc
 prettyParams params =
   concatWith (comma <> text " ") $ fmap prettyParam params
+
+prettyParamPatterns :: [ParamPattern] -> Doc
+prettyParamPatterns params =
+  concatWith (comma <> text " ") $ fmap prettyParamPattern params
 
 prettyCmd :: Cmd -> Doc
 prettyCmd (CAssign _ lhs rhs) =
@@ -143,10 +214,45 @@ prettyCmd (CSkip _) =
 prettyCmd (CExt _ name params) =
   text name <> (parens $ prettyParams params)
 
+prettyCmdPattern :: CmdPattern -> Doc
+prettyCmdPattern (CPWild _ x) = text "c" <> (parens $ text x)
+prettyCmdPattern (CPAssign _ lhs rhs) =
+  prettyExprPattern lhs 0 <+> equals <+> prettyExprPattern rhs 0
+prettyCmdPattern (CPLaplace _ x b rhs) =
+  prettyVarPattern x <+> text "$=" <+> text "lap" <> (parens $ prettyFloatPattern b <> comma <+> prettyExprPattern rhs 0)
+prettyCmdPattern (CPIf _ e c1 c2) =
+  vcat [
+  text "if" <+> prettyExprPattern e 0 <+> text "then"
+  , nest 2 $ prettyCmdPattern c1 <> text ";"
+  , text "else"
+  , nest 2 $ prettyCmdPattern c2 <> text ";"
+  , text "end"
+  ]
+prettyCmdPattern (CPWhile _ e c) =
+  vcat [
+  text "while" <+> prettyExprPattern e 0 <+> text "do"
+  , nest 2 $ prettyCmdPattern c <> text ";"
+  , text "end"
+  ]
+prettyCmdPattern (CPSeq _ c1 c2) =
+  vcat [
+  prettyCmdPattern c1 <> text ";"
+  , prettyCmdPattern c2
+  ]
+prettyCmdPattern (CPSkip _) =
+  text "skip"
+prettyCmdPattern (CPExt _ name params) =
+  text name <> (parens $ prettyParamPatterns params)
+
 newtype PrettyCmd = PrettyCmd Cmd
-  deriving (Eq)
+  deriving (Eq, Arbitrary)
 newtype PrettyExpr = PrettyExpr Expr
-  deriving (Eq)
+  deriving (Eq, Arbitrary)
+
+newtype PrettyCmdPattern = PrettyCmdPattern CmdPattern
+  deriving (Eq, Arbitrary)
+newtype PrettyExprPattern = PrettyExprPattern ExprPattern
+  deriving (Eq, Arbitrary)
 
 instance Show PrettyCmd where
   show (PrettyCmd c) = Pretty.render $ prettyCmd c
@@ -154,10 +260,8 @@ instance Show PrettyCmd where
 instance Show PrettyExpr where
   show (PrettyExpr e) = Pretty.render $ prettyExpr e 0
 
-instance Arbitrary PrettyCmd where
-  arbitrary = PrettyCmd <$> arbitrary
-  shrink (PrettyCmd c) = PrettyCmd <$> shrink c
+instance Show PrettyCmdPattern where
+  show (PrettyCmdPattern c) = Pretty.render $ prettyCmdPattern c
 
-instance Arbitrary PrettyExpr where
-  arbitrary = PrettyExpr <$> arbitrary
-  shrink (PrettyExpr e) = PrettyExpr <$> shrink e
+instance Show PrettyExprPattern where
+  show (PrettyExprPattern e) = Pretty.render $ prettyExprPattern e 0

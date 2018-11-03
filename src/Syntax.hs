@@ -78,7 +78,6 @@ data LitPattern = LPInt IntPattern
                 | LPBag [ExprPattern]
                 deriving (Show, Eq, Generic)
 
-
 data ExprPattern = EPWild    Position Var
                  | EPVar     Position VarPattern
                  | EPLength  Position ExprPattern
@@ -89,10 +88,14 @@ data ExprPattern = EPWild    Position Var
                  | EPFloat   Position ExprPattern
                  | EPExp     Position ExprPattern
                  | EPLog     Position ExprPattern
-                 | EPClip    Position ExprPattern
+                 | EPClip    Position ExprPattern LitPattern
                  | EPScale   Position ExprPattern ExprPattern
                  | EPDot     Position ExprPattern ExprPattern
                  deriving (Show, Eq, Generic)
+
+isBinopPattern :: ExprPattern -> Bool
+isBinopPattern (EPBinop _ _ _ _) = True
+isBinopPattern _ = False
 
 exprPosn :: Expr -> Position
 exprPosn e = e ^. (typed @Position)
@@ -110,7 +113,11 @@ data Prog = Prog {
 
 data Param = PExpr Expr
            | PCmd  Cmd
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Generic, Ord)
+
+data ParamPattern = PPExpr ExprPattern
+                  | PPCmd  CmdPattern
+  deriving (Show, Eq, Generic)
 
 data Cmd = CAssign       Position Expr   Expr
          | CLaplace      Position Var    Float Expr
@@ -145,7 +152,25 @@ data CmdPattern = CPWild    Position Var
                 | CPWhile   Position ExprPattern CmdPattern
                 | CPSeq     Position CmdPattern  CmdPattern
                 | CPSkip    Position
+                | CPExt     Position String      [ParamPattern]
                 deriving (Generic, Show, Eq)
+
+normalizeSeqPattern :: CmdPattern -> CmdPattern
+normalizeSeqPattern (CPSeq p (CPSeq p' c1 c2) c3) =
+  normalizeSeqPattern $ CPSeq p c1 (CPSeq p' c2 c3)
+normalizeSeqPattern (CPSeq p c1 c2) =
+  CPSeq p (normalizeSeqPattern c1) (normalizeSeqPattern c2)
+normalizeSeqPattern (CPIf p e c1 c2) =
+  CPIf p e (normalizeSeqPattern c1) (normalizeSeqPattern c2)
+normalizeSeqPattern (CPWhile p e c) =
+  CPWhile p e $ normalizeSeqPattern c
+normalizeSeqPattern (CPExt p name params) =
+  (CPExt p name (fmap normalizeParamPattern params))
+normalizeSeqPattern c = c
+
+normalizeParamPattern :: ParamPattern -> ParamPattern
+normalizeParamPattern (PPCmd c) = PPCmd $ normalizeSeqPattern c
+normalizeParamPattern p = p
 
 cmdPosn :: Cmd -> Position
 cmdPosn c = c ^. typed @Position
@@ -243,9 +268,11 @@ shrinkParam (PCmd c) = PCmd <$> shrink c
 
 keywords :: [String]
 keywords =
-  ["exp", "log", "lap", "length", "clip", "scale"
+  [ "exp", "log", "lap", "length", "clip", "scale"
   , "dot", "true", "false", "if", "then", "else"
-  , "end", "do", "while", "repeat", "skip", "fc"]
+  , "end", "do", "while", "repeat", "skip", "fc"
+  , "v", "iesc", "fesc", "besc", "e", "c"
+  ]
 
 genCmdSized :: Int -> Gen Cmd
 genCmdSized sz
@@ -309,34 +336,223 @@ shrinkExpr (ELit _ lit) =
 shrinkExpr (EBinop _ e1 op e2) =
   let e1' = shrinkExpr e1
       e2' = shrinkExpr e2
-  in [EBinop trivialPosition lhs op rhs | lhs <- e1', rhs <- e2'] ++ e1' ++ e2'
+  in [EBinop trivialPosition lhs op rhs | lhs <- e1', rhs <- e2'] ++ [e1, e2]
 shrinkExpr (EIndex _ e1 e2) =
   let e1' = shrinkExpr e1
       e2' = shrinkExpr e2
-  in [EIndex trivialPosition lhs rhs | lhs <- e1', rhs <- e2'] ++ e1' ++ e2'
+  in [EIndex trivialPosition lhs rhs | lhs <- e1', rhs <- e2'] ++ [e1, e2]
 shrinkExpr (ERAccess _ e label) =
   let e' = shrinkExpr e
-  in [ERAccess trivialPosition r label | r <- e'] ++ e'
+  in [ERAccess trivialPosition r label | r <- e'] ++ [e]
 shrinkExpr (EFloat _ e) =
   let e' = shrinkExpr e
-  in fmap (EFloat trivialPosition) e' ++ e'
+  in fmap (EFloat trivialPosition) e' ++ [e]
 shrinkExpr (EExp _ e) =
   let e' = shrinkExpr e
-  in fmap (EExp trivialPosition) e' ++ e'
+  in fmap (EExp trivialPosition) e' ++ [e]
 shrinkExpr (ELog _ e) =
   let e' = shrinkExpr e
-  in fmap (ELog trivialPosition) e' ++ e'
+  in fmap (ELog trivialPosition) e' ++ [e]
 shrinkExpr (EClip _ e lit) =
   let e' = shrinkExpr e
-  in [EClip trivialPosition e1 lit' | e1 <- e', lit' <- shrinkLit lit] ++ e'
+  in [EClip trivialPosition e1 lit' | e1 <- e', lit' <- shrinkLit lit] ++ [e]
 shrinkExpr (EScale _ e1 e2) =
   let e1' = shrinkExpr e1
       e2' = shrinkExpr e2
-  in [EScale trivialPosition lhs rhs | lhs <- e1', rhs <- e2'] ++ e1' ++ e2'
+  in [EScale trivialPosition lhs rhs | lhs <- e1', rhs <- e2'] ++ [e1, e2]
 shrinkExpr (EDot _ e1 e2) =
   let e1' = shrinkExpr e1
       e2' = shrinkExpr e2
-  in [EDot trivialPosition lhs rhs | lhs <- e1', rhs <- e2'] ++ e1' ++ e2'
+  in [EDot trivialPosition lhs rhs | lhs <- e1', rhs <- e2'] ++ [e1, e2]
+
+genIntPattern :: Gen IntPattern
+genIntPattern = frequency [
+  (1, AtomExact <$> arbitrary)
+  , (1, AtomWild <$> genIdent)
+  ]
+
+shrinkIntPattern :: IntPattern -> [IntPattern]
+shrinkIntPattern (AtomExact i) = AtomExact <$> shrink i
+shrinkIntPattern x@(AtomWild _) = [x]
+
+genFloatPattern :: Gen FloatPattern
+genFloatPattern = frequency [
+  (1, AtomExact <$> arbitrary)
+  , (1, AtomWild <$> genIdent)
+  ]
+
+shrinkFloatPattern :: FloatPattern -> [FloatPattern]
+shrinkFloatPattern (AtomExact i) = AtomExact <$> shrink i
+shrinkFloatPattern x@(AtomWild _) = [x]
+
+genBoolPattern :: Gen BoolPattern
+genBoolPattern = frequency [
+  (1, AtomExact <$> arbitrary)
+  , (1, AtomWild <$> genIdent)
+  ]
+
+shrinkBoolPattern :: BoolPattern -> [BoolPattern]
+shrinkBoolPattern (AtomExact i) = AtomExact <$> shrink i
+shrinkBoolPattern x@(AtomWild _) = [x]
+
+genVarPattern :: Gen VarPattern
+genVarPattern = frequency [
+  (1, AtomExact <$> genIdent)
+  , (1, AtomWild <$> genIdent)
+  ]
+
+shrinkVarPattern :: VarPattern -> [VarPattern]
+shrinkVarPattern x = [x]
+
+genLitPatternSized :: Int -> Gen LitPattern
+genLitPatternSized sz
+  | sz <= 0 = frequency [
+      (1, LPInt <$> genIntPattern)
+      , (1, LPFloat <$> genFloatPattern)
+      , (1, LPBool <$> genBoolPattern)
+      ]
+  | otherwise = frequency [
+      (1, LPInt <$> genIntPattern)
+      , (1, LPFloat <$> genFloatPattern)
+      , (1, LPBool <$> genBoolPattern)
+      , (1, LPArr <$> listOf (genExprPatternSized (sz - 1)))
+      , (1, LPBag <$> listOf (genExprPatternSized (sz - 1)))
+      ]
+
+shrinkLitPattern :: LitPattern -> [LitPattern]
+shrinkLitPattern (LPInt ip) = LPInt <$> shrinkIntPattern ip
+shrinkLitPattern (LPFloat fp) = LPFloat <$> shrinkFloatPattern fp
+shrinkLitPattern (LPBool bp) = LPBool <$> shrinkBoolPattern bp
+shrinkLitPattern (LPArr es) = LPArr <$> shrink es
+shrinkLitPattern (LPBag es) = LPBag <$> shrink es
+
+genAssocBinopPatternSized :: Int -> Gen ExprPattern
+genAssocBinopPatternSized sz =
+  EPBinop trivialPosition
+  <$> genExprPatternSized (sz - 1)
+  <*> genAssocOp
+  <*> genExprPatternSized (sz - 1)
+
+genNonAssocBinopPatternSized :: Int -> Gen ExprPattern
+genNonAssocBinopPatternSized sz = do
+  lhs <- genExprPatternSized (sz - 1) `suchThat` (not . isBinopPattern)
+  rhs <- genExprPatternSized (sz - 1) `suchThat` (not . isBinopPattern)
+  op <- genNonAssocOp
+  return $ EPBinop trivialPosition lhs op rhs
+
+genExprPatternSized :: Int -> Gen ExprPattern
+genExprPatternSized sz
+  | sz <= 0 = frequency [
+      (1, EPWild trivialPosition <$> genIdent)
+      , (1, EPVar trivialPosition <$> genVarPattern)
+      ]
+  | otherwise = frequency [
+      (1, EPWild trivialPosition
+        <$> genIdent)
+      , (1, EPVar trivialPosition
+          <$> genVarPattern)
+      , (1, EPLength trivialPosition
+          <$> genExprPatternSized (sz - 1))
+      , (1, EPLit trivialPosition
+          <$> genLitPatternSized (sz - 1))
+      , (1, genAssocBinopPatternSized (sz - 1))
+      , (1, genNonAssocBinopPatternSized (sz - 1))
+      , (1, EPIndex trivialPosition
+          <$> genExprPatternSized (sz - 1) <*> genExprPatternSized (sz - 1))
+      , (1, EPRAccess trivialPosition
+          <$> genExprPatternSized (sz - 1) <*> genIdent)
+      , (1, EPFloat trivialPosition
+          <$> genExprPatternSized (sz - 1))
+      , (1, EPExp trivialPosition
+          <$> genExprPatternSized (sz - 1))
+      , (1, EPLog trivialPosition
+          <$> genExprPatternSized (sz - 1))
+      , (1, EPClip trivialPosition
+          <$> genExprPatternSized (sz - 1)
+          <*> genLitPatternSized (sz - 1))
+      , (1, EPScale trivialPosition
+          <$> genExprPatternSized (sz - 1)
+          <*> genExprPatternSized (sz - 1))
+      , (1, EPDot trivialPosition
+          <$> genExprPatternSized (sz - 1)
+          <*> genExprPatternSized (sz - 1))
+      ]
+
+shrinkExprPattern :: ExprPattern -> [ExprPattern]
+shrinkExprPattern (EPWild _ x) = [EPWild trivialPosition x]
+shrinkExprPattern (EPVar _ vp) = EPVar trivialPosition <$> shrinkVarPattern vp
+shrinkExprPattern (EPLength _ e) = EPLength trivialPosition <$> shrinkExprPattern e
+shrinkExprPattern (EPLit _ lit) = EPLit trivialPosition <$> shrinkLitPattern lit
+shrinkExprPattern (EPBinop _ lhs op rhs) =
+  [lhs, rhs] ++ (EPBinop trivialPosition
+                 <$> (shrinkExprPattern lhs)
+                 <*> pure op
+                 <*> (shrinkExprPattern rhs))
+shrinkExprPattern (EPIndex _ e1 e2) =
+  [e1, e2] ++ (EPIndex trivialPosition
+               <$> shrinkExprPattern e1
+               <*> shrinkExprPattern e2)
+shrinkExprPattern (EPRAccess _ e label) =
+  e : (EPRAccess trivialPosition
+       <$> shrinkExprPattern e
+       <*> pure label)
+shrinkExprPattern (EPFloat _ e) =
+  e : (EPFloat trivialPosition
+       <$> shrinkExprPattern e)
+shrinkExprPattern (EPExp _ e) =
+  e : (EPExp trivialPosition
+       <$> shrinkExprPattern e)
+shrinkExprPattern (EPLog _ e) =
+  e : (EPLog trivialPosition
+       <$> shrinkExprPattern e)
+shrinkExprPattern (EPClip _ e lit) =
+  e : (EPClip trivialPosition
+       <$> shrinkExprPattern e
+       <*> shrink lit)
+shrinkExprPattern (EPScale _ e1 e2) =
+  [e1, e2] ++ (EPScale trivialPosition
+               <$> shrinkExprPattern e1
+               <*> shrinkExprPattern e2)
+shrinkExprPattern (EPDot _ e1 e2) =
+  [e1, e2] ++ (EPDot trivialPosition
+               <$> shrinkExprPattern e1
+               <*> shrinkExprPattern e2)
+
+genParamPatternSized :: Int -> Gen ParamPattern
+genParamPatternSized sz =
+  frequency [
+  (1, PPExpr <$> genExprPatternSized (sz - 1))
+  , (1, PPCmd <$> genCmdPatternSized (sz - 1))
+  ]
+
+genParamPatternsSized :: Int -> Gen [ParamPattern]
+genParamPatternsSized sz = listOf (genParamPatternSized sz)
+
+genCmdPatternSized :: Int -> Gen CmdPattern
+genCmdPatternSized sz
+  | sz <= 0 = frequency [
+      (1, CPWild trivialPosition <$> genIdent)
+      ]
+  | otherwise = frequency [
+      (1, CPWild trivialPosition
+        <$> genIdent)
+      , (1, CPAssign trivialPosition
+          <$> genExprPatternSized (sz - 1) <*> genExprPatternSized (sz - 1))
+      , (1, CPLaplace trivialPosition
+          <$> genVarPattern <*> genFloatPattern <*> genExprPatternSized (sz - 1))
+      , (1, CPIf trivialPosition
+          <$> genExprPatternSized (sz - 1)
+          <*> genCmdPatternSized (sz - 1)
+          <*> genCmdPatternSized (sz - 1))
+      , (1, CPWhile trivialPosition
+          <$> genExprPatternSized (sz - 1)
+          <*> genCmdPatternSized (sz - 1))
+      , (1, CPSeq trivialPosition
+          <$> genCmdPatternSized (sz - 1)
+          <*> genCmdPatternSized (sz - 1))
+      , (1, pure $ CPSkip trivialPosition)
+      , (1, CPExt trivialPosition <$> genIdent <*> genParamPatternsSized (sz - 1))
+      ]
 
 instance Arbitrary Param where
   arbitrary = sized genParamSized
@@ -353,3 +569,17 @@ instance Arbitrary Expr where
 instance Arbitrary Cmd where
   arbitrary = sized genCmdSized
   shrink = shrinkCmd
+
+instance Arbitrary ParamPattern where
+  arbitrary = sized genParamPatternSized
+
+instance Arbitrary LitPattern where
+  arbitrary = sized genLitPatternSized
+  shrink = shrinkLitPattern
+
+instance Arbitrary ExprPattern where
+  arbitrary = sized genExprPatternSized
+  shrink = shrinkExprPattern
+
+instance Arbitrary CmdPattern where
+  arbitrary = sized genCmdPatternSized

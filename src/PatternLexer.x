@@ -8,7 +8,7 @@ import Data.Generics.Product
 
 }
 
-%wrapper "posn"
+%wrapper "monad"
 
 $digit      = 0-9
 $alpha      = [a-zA-Z]
@@ -16,62 +16,66 @@ $whitespace = [\ \t]
 $eol        = [\n\r]
 
 @number     = $digit+
+@decimal    = @number \. @number
+@scientific = @decimal "e" "-"{0,1} @number
+@float      = (@decimal|@scientific)
 @identifier = $alpha($alpha|_|$digit|')*
 
 tokens :-
 
 $whitespace                   ;
 $eol                          ;
-"("                           { \p _ -> TLParen p }
-")"                           { \p _ -> TRParen p }
-","                           { \p _ -> TComma p }
-"["                           { \p _ -> TLBrack p }
-"]"                           { \p _ -> TRBrack p }
-"{"                           { \p _ -> TLBrace p }
-"}"                           { \p _ -> TRBrace p }
-":"                           { \p _ -> TColon p }
-";"                           { \p _ -> TSemiColon p }
-"+"                           { \p _ -> TPlus p }
-"-"                           { \p _ -> TMinus p }
-"*"                           { \p _ -> TMult p }
-"/"                           { \p _ -> TDiv p }
-"."                           { \p _ -> TDot p }
-"<"                           { \p _ -> TLt p }
-"<="                          { \p _ -> TLe p }
-">"                           { \p _ -> TGt p }
-">="                          { \p _ -> TGe p }
-"!="                          { \p _ -> TNeq p }
-"&&"                          { \p _ -> TAnd p }
-"||"                          { \p _ -> TOr p }
-"$="                          { \p _ -> TSample p }
-"=="                          { \p _ -> TEqEq p }
-"="                           { \p _ -> TEq p }
-"exp"                         { \p _ -> TExp p }
-"log"                         { \p _ -> TLog p }
-"lap"                         { \p _ -> TLaplace p }
-"length"                      { \p _ -> TLength p }
-"clip"                        { \p _ -> TClip p }
-"scale"                       { \p _ -> TScale p }
-"dot"                         { \p _ -> TDotP p }
-"true"                        { \p _ -> TTrue p }
-"false"                       { \p _ -> TFalse p }
-"if"                          { \p _ -> TIf p }
-"then"                        { \p _ -> TThen p }
-"else"                        { \p _ -> TElse p }
-"end"                         { \p _ -> TEnd p }
-"do"                          { \p _ -> TDo p }
-"while"                       { \p _ -> TWhile p }
-"repeat"                      { \p _ -> TRepeat p }
-"skip"                        { \p _ -> TSkip p }
-"fc"                          { \p _ -> TFCast p }
-"v"                           { \p _ -> TVarEscape p }
-"iesc"                        { \p _ -> TIntEscape p }
-"fesc"                        { \p _ -> TFloatEscape p }
-"e"                           { \p _ -> TExprEscape p }
-"c"                           { \p _ -> TCmdEscape p }
-@identifier                   { \p s -> TIdent p s }
-@number \. @number            { \p s -> TFloat p (read s) }
-@number                       { \p s -> TInt p (read s) }
+"("                           { tokAct $ \p _ -> TLParen p }
+")"                           { tokAct $ \p _ -> TRParen p }
+","                           { tokAct $ \p _ -> TComma p }
+"["                           { tokAct $ \p _ -> TLBrack p }
+"]"                           { tokAct $ \p _ -> TRBrack p }
+"{"                           { tokAct $ \p _ -> TLBrace p }
+"}"                           { tokAct $ \p _ -> TRBrace p }
+":"                           { tokAct $ \p _ -> TColon p }
+";"                           { tokAct $ \p _ -> TSemiColon p }
+"+"                           { tokAct $ \p _ -> TPlus p }
+"-"                           { tokAct $ \p _ -> TMinus p }
+"*"                           { tokAct $ \p _ -> TMult p }
+"/"                           { tokAct $ \p _ -> TDiv p }
+"."                           { tokAct $ \p _ -> TDot p }
+"<"                           { tokAct $ \p _ -> TLt p }
+"<="                          { tokAct $ \p _ -> TLe p }
+">"                           { tokAct $ \p _ -> TGt p }
+">="                          { tokAct $ \p _ -> TGe p }
+"!="                          { tokAct $ \p _ -> TNeq p }
+"&&"                          { tokAct $ \p _ -> TAnd p }
+"||"                          { tokAct $ \p _ -> TOr p }
+"$="                          { tokAct $ \p _ -> TSample p }
+"=="                          { tokAct $ \p _ -> TEqEq p }
+"="                           { tokAct $ \p _ -> TEq p }
+"exp"                         { tokAct $ \p _ -> TExp p }
+"log"                         { tokAct $ \p _ -> TLog p }
+"lap"                         { tokAct $ \p _ -> TLaplace p }
+"length"                      { tokAct $ \p _ -> TLength p }
+"clip"                        { tokAct $ \p _ -> TClip p }
+"scale"                       { tokAct $ \p _ -> TScale p }
+"dot"                         { tokAct $ \p _ -> TDotP p }
+"true"                        { tokAct $ \p _ -> TTrue p }
+"false"                       { tokAct $ \p _ -> TFalse p }
+"if"                          { tokAct $ \p _ -> TIf p }
+"then"                        { tokAct $ \p _ -> TThen p }
+"else"                        { tokAct $ \p _ -> TElse p }
+"end"                         { tokAct $ \p _ -> TEnd p }
+"do"                          { tokAct $ \p _ -> TDo p }
+"while"                       { tokAct $ \p _ -> TWhile p }
+"repeat"                      { tokAct $ \p _ -> TRepeat p }
+"skip"                        { tokAct $ \p _ -> TSkip p }
+"fc"                          { tokAct $ \p _ -> TFCast p }
+"v"                           { tokAct $ \p _ -> TVarEscape p }
+"iesc"                        { tokAct $ \p _ -> TIntEscape p }
+"fesc"                        { tokAct $ \p _ -> TFloatEscape p }
+"besc"                        { tokAct $ \p _ -> TBoolEscape p }
+"e"                           { tokAct $ \p _ -> TExprEscape p }
+"c"                           { tokAct $ \p _ -> TCmdEscape p }
+@identifier                   { ident }
+@float                        { float }
+@number                       { int }
 
 {
 
@@ -127,10 +131,37 @@ data Token = TIdent     AlexPosn String
            | TVarEscape AlexPosn
            | TIntEscape AlexPosn
            | TFloatEscape AlexPosn
+           | TBoolEscape AlexPosn
            | TExprEscape AlexPosn
            | TCmdEscape AlexPosn
+           | TEOF       AlexPosn
   deriving (Generic, Show, Eq)
 
 getAlexPosn :: Token -> AlexPosn
-getAlexPosn token = token ^. (typed @AlexPosn)
+getAlexPosn tok = tok ^. (typed @AlexPosn)
+
+tokAct :: (AlexPosn -> String -> Token) -> AlexInput -> Int -> Alex Token
+tokAct f (p, _, _, s) _ = return $ f p s
+
+ident :: AlexInput -> Int -> Alex Token
+ident (p, _, _, s) len = return $ TIdent p (take len s)
+
+float :: AlexInput -> Int -> Alex Token
+float (p, _, _, s) len = return $ TFloat p (read $ take len s)
+
+int :: AlexInput -> Int -> Alex Token
+int (p, _, _, s) len = return $ TInt p (read $ take len s)
+
+alexEOF :: Alex Token
+alexEOF = return $ TEOF (AlexPn 0 0 0)
+
+scanTokens' :: [Token] -> Alex [Token]
+scanTokens' acc = do
+  t <- alexMonadScan
+  case t of
+    TEOF _ -> return . reverse $ acc
+    _      -> scanTokens' (t:acc)
+
+scanTokens :: Alex [Token]
+scanTokens = scanTokens' []
 }
