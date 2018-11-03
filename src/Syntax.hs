@@ -68,6 +68,14 @@ data AtomPattern a = AtomExact a
 atomToPattern :: a -> AtomPattern a
 atomToPattern = AtomExact
 
+atomClosed :: AtomPattern a -> Bool
+atomClosed (AtomExact _) = True
+atomClosed _ = False
+
+atomRecover :: AtomPattern a -> Maybe a
+atomRecover (AtomExact a) = Just a
+atomRecover _ = Nothing
+
 type VarPattern   = AtomPattern Var
 type IntPattern   = AtomPattern Int
 type FloatPattern = AtomPattern Float
@@ -87,6 +95,32 @@ litToPattern (LFloat f) = LPFloat . atomToPattern $ f
 litToPattern (LBool b) = LPBool . atomToPattern $ b
 litToPattern (LArr es) = LPArr $ fmap exprToPattern es
 litToPattern (LBag es) = LPBag $ fmap exprToPattern es
+
+litClosed :: LitPattern -> Bool
+litClosed (LPInt ip) = atomClosed ip
+litClosed (LPFloat fp) = atomClosed fp
+litClosed (LPBool bp) = atomClosed bp
+litClosed (LPArr ep) = all exprClosed ep
+litClosed (LPBag ep) = all exprClosed ep
+
+newtype AllJust a = AllJust { getAllJust :: Maybe [a] }
+
+instance Semigroup (AllJust a) where
+  (AllJust (Just xs)) <> (AllJust (Just ys)) = AllJust . Just $ xs ++ ys
+  _                   <> _                   = AllJust Nothing
+
+instance Monoid (AllJust a) where
+  mempty = AllJust . Just $ []
+  mappend = (<>)
+
+litRecover :: LitPattern -> Maybe Lit
+litRecover (LPInt ip) = LInt <$> atomRecover ip
+litRecover (LPFloat fp) = LFloat <$> atomRecover fp
+litRecover (LPBool bp) = LBool <$> atomRecover bp
+litRecover (LPArr eps) =
+  LArr <$> (getAllJust (foldMap (\ep -> AllJust $ (:[]) <$> (exprRecover ep)) eps))
+litRecover (LPBag eps) =
+  LBag <$> (getAllJust (foldMap (\ep -> AllJust $ (:[]) <$> (exprRecover ep)) eps))
 
 data ExprPattern = EPWild    Position Var
                  | EPVar     Position VarPattern
@@ -117,6 +151,45 @@ exprToPattern (EClip p e l) = EPClip p (exprToPattern e) (litToPattern l)
 exprToPattern (EScale p e1 e2) = EPScale p (exprToPattern e1) (exprToPattern e2)
 exprToPattern (EDot p e1 e2) = EPDot p (exprToPattern e1) (exprToPattern e2)
 
+exprClosed :: ExprPattern -> Bool
+exprClosed (EPWild _ _) = False
+exprClosed (EPVar _ vp) = atomClosed vp
+exprClosed (EPLength _ ep) = exprClosed ep
+exprClosed (EPLit _ lp) = litClosed lp
+exprClosed (EPBinop _ e1 _ e2) = exprClosed e1 && exprClosed e2
+exprClosed (EPIndex _ e1 e2) = exprClosed e1 && exprClosed e2
+exprClosed (EPRAccess _ e _) = exprClosed e
+exprClosed (EPFloat _ e) = exprClosed e
+exprClosed (EPExp _ e) = exprClosed e
+exprClosed (EPLog _ e) = exprClosed e
+exprClosed (EPClip _ e lit) = exprClosed e && litClosed lit
+exprClosed (EPScale _ e1 e2) = exprClosed e1 && exprClosed e2
+exprClosed (EPDot _ e1 e2) = exprClosed e1 && exprClosed e2
+
+exprRecover :: ExprPattern -> Maybe Expr
+exprRecover (EPWild _ _) = Nothing
+exprRecover (EPVar p vp) = EVar p <$> atomRecover vp
+exprRecover (EPLength p ep) = ELength p <$> exprRecover ep
+exprRecover (EPLit p lp) = ELit p <$> litRecover lp
+exprRecover (EPBinop p e1 op e2) =
+  EBinop p <$> exprRecover e1 <*> pure op <*> exprRecover e2
+exprRecover (EPIndex p e1 e2) =
+  EIndex p <$> exprRecover e1 <*> exprRecover e2
+exprRecover (EPRAccess p e label) =
+  ERAccess p <$> exprRecover e <*> pure label
+exprRecover (EPFloat p e) =
+  EFloat p <$> exprRecover e
+exprRecover (EPExp p e) =
+  EExp p <$> exprRecover e
+exprRecover (EPLog p e) =
+  ELog p <$> exprRecover e
+exprRecover (EPClip p e l) =
+  EClip p <$> exprRecover e <*> litRecover l
+exprRecover (EPScale p e1 e2) =
+  EScale p <$> exprRecover e1 <*> exprRecover e2
+exprRecover (EPDot p e1 e2) =
+  EDot p <$> exprRecover e1 <*> exprRecover e2
+
 isBinopPattern :: ExprPattern -> Bool
 isBinopPattern (EPBinop _ _ _ _) = True
 isBinopPattern _ = False
@@ -146,6 +219,14 @@ data ParamPattern = PPExpr ExprPattern
 paramToPattern :: Param -> ParamPattern
 paramToPattern (PExpr e) = PPExpr $ exprToPattern e
 paramToPattern (PCmd c) = PPCmd $ cmdToPattern c
+
+paramClosed :: ParamPattern -> Bool
+paramClosed (PPExpr e) = exprClosed e
+paramClosed (PPCmd c) = cmdClosed c
+
+paramRecover :: ParamPattern -> Maybe Param
+paramRecover (PPExpr e) = PExpr <$> exprRecover e
+paramRecover (PPCmd c) = PCmd <$> cmdRecover c
 
 data Cmd = CAssign       Position Expr   Expr
          | CLaplace      Position Var    Float Expr
@@ -197,6 +278,33 @@ cmdToPattern (CSeq p c1 c2) =
 cmdToPattern (CSkip p) = CPSkip p
 cmdToPattern (CExt p name params) =
   CPExt p name (fmap paramToPattern params)
+
+cmdClosed :: CmdPattern -> Bool
+cmdClosed (CPWild _ _) = False
+cmdClosed (CPAssign _ e1 e2) = exprClosed e1 && exprClosed e2
+cmdClosed (CPLaplace _ vp fp ep) = atomClosed vp && atomClosed fp && exprClosed ep
+cmdClosed (CPIf _ e c1 c2) = exprClosed e && cmdClosed c1 && cmdClosed c2
+cmdClosed (CPWhile _ e c) = exprClosed e && cmdClosed c
+cmdClosed (CPSeq _ c1 c2) = cmdClosed c1 && cmdClosed c2
+cmdClosed (CPSkip _) = True
+cmdClosed (CPExt _ _ params) = all paramClosed params
+
+cmdRecover :: CmdPattern -> Maybe Cmd
+cmdRecover (CPWild _ _) = Nothing
+cmdRecover (CPAssign p e1 e2) =
+  CAssign p <$> exprRecover e1 <*> exprRecover e2
+cmdRecover (CPLaplace p vp fp ep) =
+  CLaplace p <$> atomRecover vp <*> atomRecover fp <*> exprRecover ep
+cmdRecover (CPIf p e c1 c2) =
+  CIf p <$> exprRecover e <*> cmdRecover c1 <*> cmdRecover c2
+cmdRecover (CPWhile p e c) =
+  CWhile p <$> exprRecover e <*> cmdRecover c
+cmdRecover (CPSeq p c1 c2) =
+  CSeq p <$> cmdRecover c1 <*> cmdRecover c2
+cmdRecover (CPSkip p) = Just $ CSkip p
+cmdRecover (CPExt p name params) =
+  CExt p name <$> (getAllJust
+                     (foldMap (\pp -> AllJust $ (:[]) <$> (paramRecover pp)) params))
 
 normalizeSeqPattern :: CmdPattern -> CmdPattern
 normalizeSeqPattern (CPSeq p (CPSeq p' c1 c2) c3) =

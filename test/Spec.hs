@@ -45,16 +45,49 @@ prop_roundtripPattern pc@(PrettyCmdPattern c) =
 prop_exprMatchSelf :: PrettyExpr -> Bool
 prop_exprMatchSelf (PrettyExpr e) =
   let ep = exprToPattern e
-  in matchExprBool ep e
+  in matches ep e
 
 prop_cmdMatchSelf :: PrettyCmd -> Bool
 prop_cmdMatchSelf (PrettyCmd c) =
   let cp = cmdToPattern c
-  in matchCmdBool cp c
+  in matches cp c
+
+prop_matchingPairMatches :: (Matching a) => MatchingPair a -> Bool
+prop_matchingPairMatches (MatchingPair v p) =
+  matches p v
+
+prop_closedPatterns :: forall a. (Matching a) => a -> Bool
+prop_closedPatterns v =
+  (closed @a) . (pattern @a) $ v
+
+prop_valuePatternRecovers :: forall a. (Matching a, Eq a) => a -> Bool
+prop_valuePatternRecovers v =
+  case recover @a (pattern @a v) of
+    Nothing -> False
+    Just v' -> v == v'
+
+prop_matchingPairRecovers :: forall a. (Matching a, Eq a) => MatchingPair a -> Bool
+prop_matchingPairRecovers (MatchingPair v p) =
+  case tryUnify p v of
+    Nothing -> False
+    Just env ->
+      case subst @a p env of
+        Nothing -> False
+        Just p' ->
+          case recover @a p' of
+            Nothing -> False
+            Just v' -> v == v'
 
 main :: IO ()
 main = do
   putStrLn ""
+
+  putStrLn "    ______                _ "
+  putStrLn "   / ____/_  __________  (_)"
+  putStrLn "  / /_  / / / /_  /_  / / / "
+  putStrLn " / __/ / /_/ / / /_/ /_/ /  "
+  putStrLn "/_/    \\__,_/ /___/___/_/   "
+
   putStrLn "*********************"
   putStrLn "*  QuickCheckTests  *"
   putStrLn "*********************"
@@ -66,4 +99,12 @@ main = do
        .&&. prop_roundtripExprPattern
        .&&. prop_exprMatchSelf
        .&&. prop_cmdMatchSelf
+       .&&. (prop_matchingPairMatches @Cmd)
+       .&&. (prop_matchingPairMatches @Expr)
+       .&&. (prop_closedPatterns @Cmd)
+       .&&. (prop_closedPatterns @Expr)
+       .&&. (prop_valuePatternRecovers @Cmd)
+       .&&. (prop_valuePatternRecovers @Expr)
+       .&&. (prop_matchingPairRecovers @Cmd)
+       .&&. (prop_matchingPairRecovers @Expr)
   unless (isSuccess r) exitFailure

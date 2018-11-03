@@ -3,8 +3,10 @@
 module Match where
 
 import Syntax
+import Pretty
 import qualified Data.Set as S
 import qualified Data.Map as M
+import Test.QuickCheck
 
 data UniResult = UniVar Var
                | UniLit Lit
@@ -71,6 +73,34 @@ matchAtom (AtomExact a1) a2 =
 matchAtom (AtomWild x) a =
   pure . Just $ (x, a)
 
+substIntPattern :: IntPattern -> UniEnv -> Maybe IntPattern
+substIntPattern a@(AtomExact _) _ = Just a
+substIntPattern (AtomWild x) env =
+  case M.lookup x env of
+    Just (UniLit (LInt v)) -> Just $ AtomExact v
+    _ -> Nothing
+
+substFloatPattern :: FloatPattern -> UniEnv -> Maybe FloatPattern
+substFloatPattern a@(AtomExact _) _ = Just a
+substFloatPattern (AtomWild x) env =
+  case M.lookup x env of
+    Just (UniLit (LFloat v)) -> Just $ AtomExact v
+    _ -> Nothing
+
+substBoolPattern :: BoolPattern -> UniEnv -> Maybe BoolPattern
+substBoolPattern a@(AtomExact _) _ = Just a
+substBoolPattern (AtomWild x) env =
+  case M.lookup x env of
+    Just (UniLit (LBool v)) -> Just $ AtomExact v
+    _ -> Nothing
+
+substVarPattern :: VarPattern -> UniEnv -> Maybe VarPattern
+substVarPattern a@(AtomExact _) _ = Just a
+substVarPattern (AtomWild x) env =
+  case M.lookup x env of
+    Just (UniVar v) -> Just $ AtomExact v
+    _ -> Nothing
+
 matchLit :: LitPattern -> Lit -> UniEnv -> UniM UniEnv
 matchLit (LPInt ip) (LInt i) env = do
   r <- matchAtom ip i
@@ -90,6 +120,17 @@ matchLit (LPBool bp) (LBool b) env = do
 matchLit (LPArr eps) (LArr es) env = matchPatterns matchExpr eps es env
 matchLit (LPBag eps) (LBag es) env = matchPatterns matchExpr eps es env
 matchLit _           _         _   = justFail
+
+substLit :: LitPattern -> UniEnv -> Maybe LitPattern
+substLit (LPInt ip) env = LPInt <$> substIntPattern ip env
+substLit (LPFloat fp) env = LPFloat <$> substFloatPattern fp env
+substLit (LPBool bp) env = LPBool <$> substBoolPattern bp env
+substLit (LPArr eps) env = do
+  es <- mapM (flip substExpr env) eps
+  return $ LPArr es
+substLit (LPBag eps) env = do
+  es <- mapM (flip substExpr env) eps
+  return $ LPBag es
 
 matchPatterns :: (p -> e -> UniEnv -> UniM UniEnv) -> [p] -> [e] -> UniEnv -> UniM UniEnv
 matchPatterns _ []     []     env = return env
@@ -143,12 +184,46 @@ matchExpr (EPDot _ ep1 ep2) (EDot _ e1 e2) env = do
   unify env1 env2
 matchExpr _ _ _ = justFail
 
+substExpr :: ExprPattern -> UniEnv -> Maybe ExprPattern
+substExpr (EPWild _ x) env =
+  case M.lookup x env of
+    Just (UniExpr e) -> Just $ exprToPattern e
+    _ -> Nothing
+substExpr (EPVar p vp) env =
+  EPVar p <$> substVarPattern vp env
+substExpr (EPLength p ep) env =
+  EPLength p <$> substExpr ep env
+substExpr (EPLit p lit) env =
+  EPLit p <$> substLit lit env
+substExpr (EPBinop p e1 op e2) env =
+  EPBinop p <$> substExpr e1 env <*> pure op <*> substExpr e2 env
+substExpr (EPIndex p e1 e2) env =
+  EPIndex p <$> substExpr e1 env <*> substExpr e2 env
+substExpr (EPRAccess p e label) env =
+  EPRAccess p <$> substExpr e env <*> pure label
+substExpr (EPFloat p e) env =
+  EPFloat p <$> substExpr e env
+substExpr (EPExp p e) env =
+  EPExp p <$> substExpr e env
+substExpr (EPLog p e) env =
+  EPLog p <$> substExpr e env
+substExpr (EPClip p e lit) env =
+  EPClip p <$> substExpr e env <*> substLit lit env
+substExpr (EPScale p e1 e2) env =
+  EPScale p <$> substExpr e1 env <*> substExpr e2 env
+substExpr (EPDot p e1 e2) env =
+  EPDot p <$> substExpr e1 env <*> substExpr e2 env
+
 matchParam :: ParamPattern -> Param -> UniEnv -> UniM UniEnv
 matchParam (PPCmd cp) (PCmd c) env =
   matchCmd cp c env
 matchParam (PPExpr ep) (PExpr e) env =
   matchExpr ep e env
 matchParam _ _ _ = justFail
+
+substParam :: ParamPattern -> UniEnv -> Maybe ParamPattern
+substParam (PPCmd c) env = PPCmd <$> substCmd c env
+substParam (PPExpr e) env = PPExpr <$> substExpr e env
 
 matchCmd :: CmdPattern -> Cmd -> UniEnv -> UniM UniEnv
 matchCmd (CPWild _ x) c env =
@@ -190,6 +265,26 @@ matchCmd (CPExt _ name pps) (CExt _ name' ps) env
     matchPatterns matchParam pps ps env
 matchCmd _ _ _ = justFail
 
+substCmd :: CmdPattern -> UniEnv -> Maybe CmdPattern
+substCmd (CPWild _ x) env =
+  case M.lookup x env of
+    Just (UniCmd c) -> Just $ cmdToPattern c
+    _ -> Nothing
+substCmd (CPAssign p e1 e2) env =
+  CPAssign p <$> substExpr e1 env <*> substExpr e2 env
+substCmd (CPLaplace p vp fp ep) env =
+  CPLaplace p <$> substVarPattern vp env <*> substFloatPattern fp env <*> substExpr ep env
+substCmd (CPIf p e c1 c2) env =
+  CPIf p <$> substExpr e env <*> substCmd c1 env <*> substCmd c2 env
+substCmd (CPWhile p e c) env =
+  CPWhile p <$> substExpr e env <*> substCmd c env
+substCmd (CPSeq p c1 c2) env =
+  CPSeq p <$> substCmd c1 env <*> substCmd c2 env
+substCmd c@(CPSkip _) _ = Just c
+substCmd (CPExt p name params) env = do
+  params' <- mapM (flip substParam env) params
+  return $ CPExt p name params'
+
 matchExprBool :: ExprPattern -> Expr -> Bool
 matchExprBool ep e =
   case runUniM (matchExpr ep e M.empty) of
@@ -201,3 +296,69 @@ matchCmdBool cp c =
   case runUniM (matchCmd cp c M.empty) of
     Left _ -> False
     Right _ -> True
+
+class Matching a where
+  type Pattern a :: *
+  type Env a :: *
+  wildcard :: Var -> Pattern a
+  pattern  :: a -> Pattern a
+  matches  :: Pattern a -> a -> Bool
+  closed   :: Pattern a -> Bool
+  recover  :: Pattern a -> Maybe a
+  subst    :: Pattern a -> Env a -> Maybe (Pattern a)
+  tryUnify :: Pattern a -> a -> Maybe (Env a)
+
+instance Matching Expr where
+  type Pattern Expr = ExprPattern
+  type Env Expr = UniEnv
+  wildcard = EPWild trivialPosition
+  pattern  = exprToPattern
+  matches  = matchExprBool
+  closed   = exprClosed
+  recover  = exprRecover
+  subst    = substExpr
+  tryUnify ep e =
+    case runUniM (matchExpr ep e M.empty) of
+      Left _ -> Nothing
+      Right env -> Just env
+
+instance Matching Cmd where
+  type Pattern Cmd = CmdPattern
+  type Env Cmd = UniEnv
+  wildcard = CPWild trivialPosition
+  pattern  = cmdToPattern
+  matches  = matchCmdBool
+  closed   = cmdClosed
+  recover  = cmdRecover
+  subst    = substCmd
+  tryUnify cp c =
+    case runUniM (matchCmd cp c M.empty) of
+      Left _ -> Nothing
+      Right env -> Just env
+
+data MatchingPair a = MatchingPair {
+  matching_value :: a
+  , matching_pattern :: Pattern a
+  }
+
+instance Show (MatchingPair Cmd) where
+  show (MatchingPair c cp) =
+    show (PrettyCmd c) ++ " ~ " ++ show (PrettyCmdPattern cp)
+
+instance Show (MatchingPair Expr) where
+  show (MatchingPair e ep) =
+    show (PrettyExpr e) ++ " ~ " ++ show (PrettyExprPattern ep)
+
+genMatchingPair' :: forall a. (Arbitrary a, Matching a) => [Var] -> Gen (MatchingPair a)
+genMatchingPair' namesInScope = do
+  v <- arbitrary
+  wild <- genIdent `suchThat` (\x -> not $ x `elem` namesInScope)
+  p <- frequency [(2, pure $ wildcard @a wild), (1, pure $ pattern v)]
+  return $ MatchingPair v p
+
+genMatchingPair :: forall a. (Arbitrary a, Matching a) => Gen (MatchingPair a)
+genMatchingPair = genMatchingPair' []
+
+instance (Arbitrary a, Matching a) => Arbitrary (MatchingPair a) where
+  arbitrary = genMatchingPair
+  -- not sure how to shrink...
