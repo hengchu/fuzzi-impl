@@ -1,6 +1,7 @@
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 module Syntax where
 
+import Data.Data
 import Data.List
 import Control.Lens ((^.))
 import GHC.Generics
@@ -21,20 +22,20 @@ data Tau = TInt
          deriving (Show, Eq)
 
 data Binop = LT | LE | GT | GE | AND | OR | EQ | NEQ | PLUS | MINUS | MULT | DIV
-  deriving (Show, Eq, Ord, Enum, Bounded)
+  deriving (Show, Eq, Ord, Enum, Bounded, Data)
 
 data Lit = LInt Int
          | LFloat Float
          | LBool Bool
          | LArr [Expr]
          | LBag [Expr]
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Data)
 
 type Line   = Int
 type Column = Int
 
 data Position = Position Line Column
-  deriving (Show, Ord)
+  deriving (Show, Ord, Data)
 
 instance Eq Position where
   _ == _ = True
@@ -59,11 +60,11 @@ data Expr = EVar     Position Var
           | EDot     Position
                      Expr     -- ^Vector
                      Expr     -- ^Vector
-  deriving (Generic, Show, Eq, Ord)
+  deriving (Generic, Show, Eq, Ord, Data)
 
 data AtomPattern a = AtomExact a
                    | AtomWild Var
-                   deriving (Show, Eq, Generic)
+                   deriving (Show, Eq, Generic, Data)
 
 atomToPattern :: a -> AtomPattern a
 atomToPattern = AtomExact
@@ -87,7 +88,7 @@ data LitPattern = LPInt IntPattern
                 | LPBool BoolPattern
                 | LPArr [ExprPattern]
                 | LPBag [ExprPattern]
-                deriving (Show, Eq, Generic)
+                deriving (Show, Eq, Generic, Data)
 
 litToPattern :: Lit -> LitPattern
 litToPattern (LInt i) = LPInt . atomToPattern $ i
@@ -135,7 +136,7 @@ data ExprPattern = EPWild    Position Var
                  | EPClip    Position ExprPattern LitPattern
                  | EPScale   Position ExprPattern ExprPattern
                  | EPDot     Position ExprPattern ExprPattern
-                 deriving (Show, Eq, Generic)
+                 deriving (Show, Eq, Generic, Data)
 
 exprToPattern :: Expr -> ExprPattern
 exprToPattern (EVar p v) = EPVar p $ atomToPattern v
@@ -214,7 +215,7 @@ data Param = PExpr Expr
 
 data ParamPattern = PPExpr ExprPattern
                   | PPCmd  CmdPattern
-  deriving (Show, Eq, Generic)
+  deriving (Show, Eq, Generic, Data)
 
 paramToPattern :: Param -> ParamPattern
 paramToPattern (PExpr e) = PPExpr $ exprToPattern e
@@ -262,7 +263,7 @@ data CmdPattern = CPWild    Position Var
                 | CPSeq     Position CmdPattern  CmdPattern
                 | CPSkip    Position
                 | CPExt     Position String      [ParamPattern]
-                deriving (Generic, Show, Eq)
+                deriving (Generic, Show, Eq, Data)
 
 cmdToPattern :: Cmd -> CmdPattern
 cmdToPattern (CAssign p e1 e2) =

@@ -49,6 +49,7 @@ library
               , lens
               , data-fix
               , QuickCheck
+              , template-haskell
   exposed-modules:
                   Lib
                 , Syntax
@@ -58,6 +59,7 @@ library
                 , PatternParser
                 , Match
                 , Pretty
+                , PatternQQ
       --, Interp
       --, Python
       --, Typechecker.Basic
@@ -84,6 +86,7 @@ library
                    , ScopedTypeVariables
                    , RankNTypes
                    , FlexibleInstances
+                   , DeriveDataTypeable
 
 executable fuzzi
   main-is: Main.hs

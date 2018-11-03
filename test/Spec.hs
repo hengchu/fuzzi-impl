@@ -8,11 +8,19 @@ import Match
 import Test.QuickCheck
 import Test.QuickCheck.Test
 import Text.RawString.QQ
+import PatternQQ
 import qualified Data.Map as M
 
 import Control.Monad
 import System.Exit
 import Debug.Trace
+
+cpat1 :: CmdPattern
+cpat1 = [cpat|
+while v(x) + 1 do
+  c(c1);
+end
+|]
 
 prop_roundtripExpr :: PrettyExpr -> Bool
 prop_roundtripExpr pe@(PrettyExpr e) =
