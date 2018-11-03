@@ -65,6 +65,9 @@ data AtomPattern a = AtomExact a
                    | AtomWild Var
                    deriving (Show, Eq, Generic)
 
+atomToPattern :: a -> AtomPattern a
+atomToPattern = AtomExact
+
 type VarPattern   = AtomPattern Var
 type IntPattern   = AtomPattern Int
 type FloatPattern = AtomPattern Float
@@ -77,6 +80,13 @@ data LitPattern = LPInt IntPattern
                 | LPArr [ExprPattern]
                 | LPBag [ExprPattern]
                 deriving (Show, Eq, Generic)
+
+litToPattern :: Lit -> LitPattern
+litToPattern (LInt i) = LPInt . atomToPattern $ i
+litToPattern (LFloat f) = LPFloat . atomToPattern $ f
+litToPattern (LBool b) = LPBool . atomToPattern $ b
+litToPattern (LArr es) = LPArr $ fmap exprToPattern es
+litToPattern (LBag es) = LPBag $ fmap exprToPattern es
 
 data ExprPattern = EPWild    Position Var
                  | EPVar     Position VarPattern
@@ -92,6 +102,20 @@ data ExprPattern = EPWild    Position Var
                  | EPScale   Position ExprPattern ExprPattern
                  | EPDot     Position ExprPattern ExprPattern
                  deriving (Show, Eq, Generic)
+
+exprToPattern :: Expr -> ExprPattern
+exprToPattern (EVar p v) = EPVar p $ atomToPattern v
+exprToPattern (ELength p e) = EPLength p $ exprToPattern e
+exprToPattern (ELit p lit) = EPLit p $ litToPattern lit
+exprToPattern (EBinop p e1 op e2) = EPBinop p (exprToPattern e1) op (exprToPattern e2)
+exprToPattern (EIndex p e1 e2) = EPIndex p (exprToPattern e1) (exprToPattern e2)
+exprToPattern (ERAccess p e label) = EPRAccess p (exprToPattern e) label
+exprToPattern (EFloat p e) = EPFloat p $ exprToPattern e
+exprToPattern (EExp p e) = EPExp p $ exprToPattern e
+exprToPattern (ELog p e) = EPLog p $ exprToPattern e
+exprToPattern (EClip p e l) = EPClip p (exprToPattern e) (litToPattern l)
+exprToPattern (EScale p e1 e2) = EPScale p (exprToPattern e1) (exprToPattern e2)
+exprToPattern (EDot p e1 e2) = EPDot p (exprToPattern e1) (exprToPattern e2)
 
 isBinopPattern :: ExprPattern -> Bool
 isBinopPattern (EPBinop _ _ _ _) = True
@@ -118,6 +142,10 @@ data Param = PExpr Expr
 data ParamPattern = PPExpr ExprPattern
                   | PPCmd  CmdPattern
   deriving (Show, Eq, Generic)
+
+paramToPattern :: Param -> ParamPattern
+paramToPattern (PExpr e) = PPExpr $ exprToPattern e
+paramToPattern (PCmd c) = PPCmd $ cmdToPattern c
 
 data Cmd = CAssign       Position Expr   Expr
          | CLaplace      Position Var    Float Expr
@@ -154,6 +182,21 @@ data CmdPattern = CPWild    Position Var
                 | CPSkip    Position
                 | CPExt     Position String      [ParamPattern]
                 deriving (Generic, Show, Eq)
+
+cmdToPattern :: Cmd -> CmdPattern
+cmdToPattern (CAssign p e1 e2) =
+  CPAssign p (exprToPattern e1) (exprToPattern e2)
+cmdToPattern (CLaplace p v f e) =
+  CPLaplace p (atomToPattern v) (atomToPattern f) (exprToPattern e)
+cmdToPattern (CIf p e c1 c2) =
+  CPIf p (exprToPattern e) (cmdToPattern c1) (cmdToPattern c2)
+cmdToPattern (CWhile p e c) =
+  CPWhile p (exprToPattern e) (cmdToPattern c)
+cmdToPattern (CSeq p c1 c2) =
+  CPSeq p (cmdToPattern c1) (cmdToPattern c2)
+cmdToPattern (CSkip p) = CPSkip p
+cmdToPattern (CExt p name params) =
+  CPExt p name (fmap paramToPattern params)
 
 normalizeSeqPattern :: CmdPattern -> CmdPattern
 normalizeSeqPattern (CPSeq p (CPSeq p' c1 c2) c3) =

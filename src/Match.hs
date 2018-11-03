@@ -129,6 +129,10 @@ matchExpr (EPExp _ ep) (EExp _ e) env =
   matchExpr ep e env
 matchExpr (EPLog _ ep) (ELog _ e) env =
   matchExpr ep e env
+matchExpr (EPClip _ ep lp) (EClip _ e l) env = do
+  env1 <- matchExpr ep e env
+  env2 <- matchLit lp l env
+  unify env1 env2
 matchExpr (EPScale _ ep1 ep2) (EScale _ e1 e2) env = do
   env1 <- matchExpr ep1 e1 env
   env2 <- matchExpr ep2 e2 env
@@ -138,3 +142,62 @@ matchExpr (EPDot _ ep1 ep2) (EDot _ e1 e2) env = do
   env2 <- matchExpr ep2 e2 env
   unify env1 env2
 matchExpr _ _ _ = justFail
+
+matchParam :: ParamPattern -> Param -> UniEnv -> UniM UniEnv
+matchParam (PPCmd cp) (PCmd c) env =
+  matchCmd cp c env
+matchParam (PPExpr ep) (PExpr e) env =
+  matchExpr ep e env
+matchParam _ _ _ = justFail
+
+matchCmd :: CmdPattern -> Cmd -> UniEnv -> UniM UniEnv
+matchCmd (CPWild _ x) c env =
+  case M.lookup x env of
+    Just ur -> if (UniCmd c) == ur then pure env else justFail
+    Nothing -> pure $ M.insert x (UniCmd c) env
+matchCmd (CPAssign _ ep1 ep2) (CAssign _ e1 e2) env = do
+  env1 <- matchExpr ep1 e1 env
+  env2 <- matchExpr ep2 e2 env
+  unify env1 env2
+matchCmd (CPLaplace _ vp fp ep) (CLaplace _ v f e) env = do
+  rv <- matchAtom vp v
+  let modifyEnv1 =
+        case rv of
+          Nothing -> id
+          Just (x, v) -> M.insert x (UniVar v)
+  rf <- matchAtom fp f
+  let modifyEnv2 =
+        case rf of
+          Nothing -> id
+          Just (x, v) -> M.insert x (UniLit . LFloat $ v)
+  matchExpr ep e (modifyEnv2 . modifyEnv1 $ env)
+matchCmd (CPIf _ ep cp1 cp2) (CIf _ e c1 c2) env = do
+  env1 <- matchExpr ep e env
+  env11 <- matchCmd cp1 c1 env1
+  env12 <- matchCmd cp2 c2 env1
+  unify env11 env12
+matchCmd (CPWhile _ ep cp) (CWhile _ e c) env = do
+  env1 <- matchExpr ep e env
+  env2 <- matchCmd cp c env
+  unify env1 env2
+matchCmd (CPSeq _ cp1 cp2) (CSeq _ c1 c2) env = do
+  env1 <- matchCmd cp1 c1 env
+  env2 <- matchCmd cp2 c2 env
+  unify env1 env2
+matchCmd (CPSkip _) (CSkip _) env = return env
+matchCmd (CPExt _ name pps) (CExt _ name' ps) env
+  | name == name' =
+    matchPatterns matchParam pps ps env
+matchCmd _ _ _ = justFail
+
+matchExprBool :: ExprPattern -> Expr -> Bool
+matchExprBool ep e =
+  case runUniM (matchExpr ep e M.empty) of
+    Left _ -> False
+    Right _ -> True
+
+matchCmdBool :: CmdPattern -> Cmd -> Bool
+matchCmdBool cp c =
+  case runUniM (matchCmd cp c M.empty) of
+    Left _ -> False
+    Right _ -> True
