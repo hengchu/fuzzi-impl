@@ -9,6 +9,7 @@ import Data.Map hiding ((\\))
 import Prelude hiding (LT, EQ, GT)
 import Data.Generics.Product
 import Test.QuickCheck
+import Generic.Random
 
 type RecordTy = Map String Tau
 
@@ -19,7 +20,7 @@ data Tau = TInt
          | TArr Tau (Maybe Int)
          | TBag Tau
          | TRec RecordTy
-         deriving (Show, Eq)
+         deriving (Show, Eq, Generic, Data)
 
 data Binop = LT | LE | GT | GE | AND | OR | EQ | NEQ | PLUS | MINUS | MULT | DIV
   deriving (Show, Eq, Ord, Enum, Bounded, Data)
@@ -199,7 +200,7 @@ exprPosn :: Expr -> Position
 exprPosn e = e ^. (typed @Position)
 
 data Decl = Decl Position Var Float Tau
-  deriving (Generic, Show, Eq)
+  deriving (Generic, Show, Eq, Data)
 
 declPosn :: Decl -> Position
 declPosn d = d ^. (typed @Position)
@@ -207,7 +208,7 @@ declPosn d = d ^. (typed @Position)
 data Prog = Prog {
   getDecls :: [Decl]
   , getCmd :: Cmd
-  } deriving (Show, Eq)
+  } deriving (Show, Eq, Data)
 
 data Param = PExpr Expr
            | PCmd  Cmd
@@ -735,3 +736,6 @@ instance Arbitrary ExprPattern where
 
 instance Arbitrary CmdPattern where
   arbitrary = sized genCmdPatternSized
+
+instance Arbitrary Tau where
+  arbitrary = genericArbitraryRec (1 % 1 % 1 % 1 % 1 % 1 % 1 % ())

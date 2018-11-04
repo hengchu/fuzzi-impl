@@ -50,6 +50,7 @@ library
               , data-fix
               , QuickCheck
               , template-haskell
+              , generic-random
   exposed-modules:
                   Lib
                 , Syntax
@@ -61,6 +62,7 @@ library
                 , Pretty
                 , PatternQQ
                 , Expand
+                , ShapeChecker
       --, Interp
       --, Python
       --, Typechecker.Basic

@@ -6,6 +6,7 @@ import Syntax
 import Pretty
 import Match
 import Expand
+import ShapeChecker
 import Test.QuickCheck
 import Test.QuickCheck.Test
 import Text.RawString.QQ
@@ -78,7 +79,7 @@ end
 
 prog3 :: Cmd
 prog3 = [cmd|
-partition(in, out, t_in, idx, t_out, t_idx, out_idx, 10, { skip; });
+partition(in, out, t_in, idx, t_out, t_idx, out_idx, t_part, 10, { skip; });
 |]
 
 prog3' :: Cmd
@@ -86,7 +87,9 @@ prog3' = [cmd|
 idx = 0;
 length(out) = 10;
 while idx < 10 do
-  length((out)[idx]) = 0;
+  t_part = (out)[idx];
+  length(t_part) = 0;
+  (out)[idx] = t_part;
   idx = idx + 1;
 end;
 idx = 0;
@@ -100,8 +103,10 @@ end;
 while idx < length(out_idx) do
   t_idx = (out_idx)[idx];
   if 0 <= t_idx && t_idx < length(out_idx) then
-    length((out)[t_idx]) = length((out)[t_idx]) + 1;
-    ((out)[t_idx])[length((out)[t_idx]) - 1] = (in)[idx];
+    t_part = (out)[t_idx];
+    length(t_part) = length(t_part) + 1;
+    (t_part)[length(t_part) - 1] = (in)[idx];
+    (out)[t_idx] = t_part;
   else
     skip;
   end;
@@ -273,6 +278,9 @@ isSeqRightAssociative _ = True
 prop_normalizeSeq :: Cmd -> Bool
 prop_normalizeSeq c = isSeqRightAssociative $ normalizeSeq c
 
+prop_isCompatRefl :: Tau -> Bool
+prop_isCompatRefl t = isCompat t t
+
 testprog :: Cmd
 testprog = [cmd|
 NBh({ skip
@@ -288,6 +296,58 @@ Y(GP, { skip
 testprogpat :: CmdPattern
 testprogpat = [cpat|
 skip
+|]
+
+prog6 :: Prog
+prog6 = [prog|
+x : int
+
+x = x + 1;
+|]
+
+expandProg :: Prog -> Prog
+expandProg (Prog decls c) = Prog decls (desugarFix c fuzziExpansionRules)
+
+prog7 :: Prog
+prog7 = [prog|
+in :[1.0] {int};
+out : {float};
+idx : int;
+t_in : int;
+t_out : float
+
+bmap(in, out, t_in, idx, t_out, { t_out = fc(t_in); });
+amap(in, out, t_in, idx, t_out, { t_out = fc(t_in); });
+|]
+
+prog8 :: Prog
+prog8 = [prog|
+in :[1.0] {bool};
+out : [{bool}];
+t_in : bool;
+idx : int;
+t_out : int;
+t_idx : int;
+out_idx : {int};
+t_part : {bool}
+
+partition(in, out, t_in, idx, t_out, t_idx, out_idx, t_part, 10, {
+  if t_in then
+    t_out = 1;
+  else
+    t_out = 0;
+  end
+});
+|]
+
+prog9 :: Prog
+prog9 = [prog|
+in :[1.0] {float};
+out : float;
+idx : int;
+t_in : float
+
+bsum(in, out, idx, t_in, 5.0);
 |]
 
 assert :: String -> Bool -> IO ()
@@ -309,6 +369,17 @@ unitTests = do
     $ normalizeSeq (desugarFix prog4 fuzziExpansionRules) == prog4'
   assert "prog5 expands correctly"
     $ normalizeSeq (desugarFix prog5 fuzziExpansionRules) == prog5'
+  assert "prog6 shape checks"
+    $ isRight . runShapeChecker $ prog6
+  assert "prog7 shape checks"
+    $ isRight . runShapeChecker
+    $ expandProg prog7
+  assert "prog8 shape checks"
+    $ isRight . runShapeChecker
+    $ expandProg prog8
+  assert "prog9 shape checks"
+    $ isRight . runShapeChecker
+    $ expandProg prog9
 
 main :: IO ()
 main = do
@@ -349,4 +420,5 @@ main = do
        .&&. prop_matchAnywhere
        .&&. prop_normalizeSeq
        .&&. prop_matchingPrefixRecover
+       .&&. prop_isCompatRefl
   unless (isSuccess r) exitFailure

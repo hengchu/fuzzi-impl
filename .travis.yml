@@ -12,4 +12,4 @@ before_install:
 
 script:
 - travis_wait stack build
-- stack test
+- travis_wait stack test
