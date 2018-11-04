@@ -60,6 +60,7 @@ library
                 , Match
                 , Pretty
                 , PatternQQ
+                , Expand
       --, Interp
       --, Python
       --, Typechecker.Basic
@@ -87,7 +88,8 @@ library
                    , RankNTypes
                    , FlexibleInstances
                    , DeriveDataTypeable
-
+                   , QuasiQuotes
+                   , TemplateHaskell
 executable fuzzi
   main-is: Main.hs
   hs-source-dirs:
@@ -117,6 +119,7 @@ test-suite fuzzi-impl-test
               , raw-strings-qq
               , containers
               , QuickCheck
+              , either
   other-modules:
       Paths_fuzzi_impl
   default-language: Haskell2010

@@ -211,7 +211,7 @@ data Prog = Prog {
 
 data Param = PExpr Expr
            | PCmd  Cmd
-  deriving (Show, Eq, Generic, Ord)
+  deriving (Show, Eq, Generic, Ord, Data)
 
 data ParamPattern = PPExpr ExprPattern
                   | PPCmd  CmdPattern
@@ -236,7 +236,7 @@ data Cmd = CAssign       Position Expr   Expr
          | CSeq          Position Cmd    Cmd
          | CSkip         Position
          | CExt          Position String [Param]
-  deriving (Generic, Show, Eq, Ord)
+  deriving (Generic, Show, Eq, Ord, Data)
 
 -- Turn CSeqs into a linked list, flattening all tree structures
 normalizeSeq :: Cmd -> Cmd

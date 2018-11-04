@@ -6,6 +6,7 @@ import Syntax
 import Pretty
 import qualified Data.Set as S
 import qualified Data.Map as M
+import Data.Either
 import Test.QuickCheck
 
 data UniResult = UniVar Var
@@ -297,6 +298,69 @@ matchCmdBool cp c =
     Left _ -> False
     Right _ -> True
 
+matchCmdPrefix' :: CmdPattern -> Cmd -> UniEnv -> UniM (UniEnv, Maybe Cmd)
+matchCmdPrefix' (CPSeq _ cp1 cp2) (CSeq _ c1 c2) env = do
+  env1 <- matchCmd cp1 c1 env
+  matchCmdPrefix' cp2 c2 env1
+matchCmdPrefix' cp (CSeq _ c1 c2) env = do
+  env1 <- matchCmd cp c1 env
+  return (env1, Just c2)
+matchCmdPrefix' cp c env = do
+  env1 <- matchCmd cp c env
+  return (env1, Nothing)
+
+matchCmdPrefix :: CmdPattern -> Cmd -> UniM (UniEnv, Maybe Cmd)
+matchCmdPrefix cp c = matchCmdPrefix' cp c M.empty
+
+type Context a = a -> a
+
+matchCmdAnywhereParams :: CmdPattern -> [Param] -> UniM (UniEnv, Cmd -> [Param])
+matchCmdAnywhereParams cp params =
+  go [] cp params
+  where go :: [Param] -> CmdPattern -> [Param] -> UniM (UniEnv, Cmd -> [Param])
+        go _   _  [] = UniM . Left $ mempty
+        go acc cp (p@(PExpr _):more) = go (p:acc) cp more
+        go acc cp (p@(PCmd c):more) =
+          case runUniM $ matchCmdAnywhere cp c of
+            Left _ -> go (p:acc) cp more
+            Right (env, hole) ->
+              return (env, \c -> (reverse (PCmd (hole c):acc)) ++ more)
+
+-- |Returns a context with a hole where the original matched cmd is, that allows
+-- us to fill in with another command.
+matchCmdAnywhere :: CmdPattern -> Cmd -> UniM (UniEnv, Context Cmd)
+matchCmdAnywhere cp c
+  | isRight . runUniM $ matchCmdPrefix cp c = do
+      (env, remains) <- matchCmdPrefix cp c
+      case remains of
+        Nothing -> return (env, id)
+        Just r -> return (env, \c -> normalizeSeq $ CSeq trivialPosition c r)
+  | otherwise =
+  case c of
+    CSeq p c1 c2
+      | isRight . runUniM $ matchCmdAnywhere cp c1 -> do
+          (env, hole) <- matchCmdAnywhere cp c1
+          return (env, \c -> CSeq p (hole c) c2)
+      | isRight . runUniM $ matchCmdAnywhere cp c2 -> do
+          (env, hole) <- matchCmdAnywhere cp c2
+          return (env, \c -> CSeq p c1 (hole c))
+    CIf p e c1 c2
+      | isRight . runUniM $ matchCmdAnywhere cp c1 -> do
+          (env, hole) <- matchCmdAnywhere cp c1
+          return (env, \c -> CIf p e (hole c) c2)
+      | isRight . runUniM $ matchCmdAnywhere cp c2 -> do
+          (env, hole) <- matchCmdAnywhere cp c2
+          return (env, \c -> CIf p e c1 (hole c))
+    CWhile p e c
+      | isRight . runUniM $ matchCmdAnywhere cp c -> do
+      (env, hole) <- matchCmdAnywhere cp c
+      return (env, \c -> CWhile p e (hole c))
+    CExt p name params
+      | isRight . runUniM $ matchCmdAnywhereParams cp params -> do
+      (env, hole) <- matchCmdAnywhereParams cp params
+      return (env, \c -> CExt p name (hole c))
+    _ -> UniM . Left $ mempty
+
 class Matching a where
   type Pattern a :: *
   type Env a :: *
@@ -362,3 +426,63 @@ genMatchingPair = genMatchingPair' []
 instance (Arbitrary a, Matching a) => Arbitrary (MatchingPair a) where
   arbitrary = genMatchingPair
   -- not sure how to shrink...
+
+data MatchingPrefixCmdPair = MatchingPrefixCmdPair {
+  matching_prefix_value :: Cmd
+  , matching_prefix_pattern :: CmdPattern
+  }
+
+genMatchingPrefixCmdPair :: Gen MatchingPrefixCmdPair
+genMatchingPrefixCmdPair = do
+  MatchingPair v p <- arbitrary
+  tail <- arbitrary
+  return $ MatchingPrefixCmdPair
+            (normalizeSeq $ CSeq trivialPosition v tail)
+            (normalizeSeqPattern p)
+
+instance Arbitrary MatchingPrefixCmdPair where
+  arbitrary = genMatchingPrefixCmdPair
+  -- not sure how to shrink...
+
+instance Show MatchingPrefixCmdPair where
+  show (MatchingPrefixCmdPair c cp) =
+    show (PrettyCmd c) ++ " ~ " ++ show (PrettyCmdPattern cp)
+
+data MatchingAnywhereCmdPair = MatchingAnywhereCmdPair {
+  matching_anywhere_value :: Cmd
+  , matching_anywhere_pattern :: CmdPattern
+  }
+
+genMatchingAnywhereCmdPairSized :: MatchingPair Cmd -> Int -> Gen MatchingAnywhereCmdPair
+genMatchingAnywhereCmdPairSized pair@(MatchingPair v p) sz
+  | sz <= 0 = return (MatchingAnywhereCmdPair v p)
+  | otherwise = do
+  v' <- frequency [
+    (1, CIf trivialPosition
+      <$> arbitrary
+      <*> (matching_anywhere_value <$> genMatchingAnywhereCmdPairSized pair (sz - 1))
+      <*> arbitrary)
+    , (1, CIf trivialPosition
+        <$> arbitrary
+        <*> arbitrary
+        <*> (matching_anywhere_value <$> genMatchingAnywhereCmdPairSized pair (sz - 1)))
+    , (1, CWhile trivialPosition
+        <$> arbitrary
+        <*> (matching_anywhere_value <$> genMatchingAnywhereCmdPairSized pair (sz - 1)))
+    , (1, CSeq trivialPosition
+        <$> (matching_anywhere_value <$> genMatchingAnywhereCmdPairSized pair (sz - 1))
+        <*> arbitrary)
+    , (1, CSeq trivialPosition
+        <$> arbitrary
+        <*> (matching_anywhere_value <$> genMatchingAnywhereCmdPairSized pair (sz - 1)))
+    ]
+  return $ MatchingAnywhereCmdPair v' p
+
+instance Arbitrary MatchingAnywhereCmdPair where
+  arbitrary = do
+    p <- arbitrary
+    sized $ genMatchingAnywhereCmdPairSized p
+
+instance Show MatchingAnywhereCmdPair where
+  show (MatchingAnywhereCmdPair c cp) =
+    show (PrettyCmd c) ++ " ~ " ++ show (PrettyCmdPattern cp)
