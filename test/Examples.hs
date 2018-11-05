@@ -27,6 +27,7 @@ sc: float;
 
 size: float
 
+/* Extend each row with a constant 1 for bias */
 bmap(db, db1, trow, i, trow1, {
   clear(trow1, clear_idx);
   trow1[0] = 1.0;
@@ -45,6 +46,7 @@ i = 0;
 clear(trow1, i);
 i = 0;
 
+/* Compute the gradient from each row */
 bmap(db1, dws, trow1, i, twout, {
   clear(twout, clear_idx);
   clear_idx = 0;
@@ -69,21 +71,118 @@ bmap(db1, dws, trow1, i, twout, {
   clear_idx = 0;
 });
 
+/* Release the size of the db, for normalizing gradients */
 size $= lap(1.0, fc(length(db)));
 
 clear(twout, clear_idx);
 clear_idx = 0;
 
+/* Project out each column of the gradient, sum up, and release */
 clear_idx = 0;
 while clear_idx < 101 do
   {
     bmap(dws, dws_j, twout, i, tf_out, { tf_out = twout[clear_idx]; });
     i = 0;
     tf_out = 0.0;
-    bsum(dws_j, j_sum, i, tf_out, 2.0);
+    bsum(dws_j, j_sum, i, tf_out, 1.0);
     j_sum $= lap(1.0, j_sum);
 
-    w[clear_idx] = j_sum;
+    w[clear_idx] = j_sum / size;
+  };
+  clear_idx = clear_idx + 1;
+end
+|]
+
+kmeans :: Prog
+kmeans = [prog|
+/* input data */
+db:[1.0] { [float(5)] };
+/* current centroids */
+cs: [ [float(5)] ];
+/* partitioned input data */
+parts: [ { [float(5)] } ];
+
+/* Auxilary variables for the partition extension */
+t_in: [float(5)];
+i: int;
+t_out: int;
+t_idx: int;
+out_idx: {int};
+t_part: {[float(5)]};
+
+/* Temporary variables used in the partition computations */
+min_dist: float;
+this_dist: float;
+clear_idx: int;
+
+k_INFINITY: float;
+
+/* Temporary variables used for computing the centroids */
+k : int;
+cs_j: [float(5)];
+this_partition: { [float(5)] };
+this_partition_k: { float };
+t_coord_k: float;
+t_coord_k_sum: float;
+part_size: float
+
+k_INFINITY = 100000000.0;
+
+/* Partition the input database into 3 partitions, same as the number of centroids */
+partition(db, parts, t_in, i, t_out, t_idx, out_idx, t_part, 3, {
+  min_dist = k_INFINITY;
+  this_dist = 0.0;
+  t_out = 0;
+
+  clear_idx = 0;
+  while clear_idx < 3 do
+    {
+      this_dist = (cs[clear_idx][0] - t_in[0]) * (cs[clear_idx][0] - t_in[0])
+                + (cs[clear_idx][1] - t_in[1]) * (cs[clear_idx][1] - t_in[1])
+                + (cs[clear_idx][2] - t_in[2]) * (cs[clear_idx][2] - t_in[2])
+                + (cs[clear_idx][3] - t_in[3]) * (cs[clear_idx][3] - t_in[3]);
+
+      if this_dist < min_dist then
+        min_dist = this_dist;
+        t_out = clear_idx;
+      else
+        skip;
+      end
+    };
+    clear_idx = clear_idx + 1;
+  end;
+
+  min_dist = 0.0;
+  this_dist = 0.0;
+});
+
+
+clear_idx = 0;
+while clear_idx < 3 do
+  {
+    this_partition = parts[clear_idx];
+    k = 0;
+    while k < 5 do
+      {
+        i = 0;
+        bmap(this_partition, this_partition_k, t_in, i, t_coord_k, {t_coord_k = t_in[clear_idx]});
+        t_coord_k_sum = 0.0;
+        t_coord_k = 0.0;
+        i = 0;
+        /* Add up all entries in kth coordinate */
+        bsum(this_partition_k, t_coord_k_sum, i, t_coord_k, 8.0);
+
+        /* normalize */
+        part_size $= lap(1.0, fc(length(this_partition_k)));
+        t_coord_k_sum $= lap(1.0, t_coord_k_sum);
+        t_coord_k_sum = t_coord_k_sum / part_size;
+
+        cs_j = cs[clear_idx];
+        cs_j[k] = t_coord_k_sum;
+        cs[clear_idx] = cs_j;
+      };
+      k = k + 1;
+    end
   };
   clear_idx = clear_idx + 1;
 end
@@ -92,18 +191,8 @@ end
 testprog1 :: Prog
 testprog1 = [prog|
 
-w: [float(101)];
-dt: float;
-sc: float;
-temp: float;
-prob: float;
-trow1: [float(102)];
-twout: [float(101)]
+x: int
 
-dt = dot(twout, w) / 1000.0;
-temp = clip(exp(-1.0 * trow1[101] * dt), 10000.0);
-prob = 1.0 / (1.0 + temp);
-sc = (1.0 - prob) * trow1[101];
-twout = scale(sc, twout);
+skip
 
 |]

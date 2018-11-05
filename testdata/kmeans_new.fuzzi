@@ -35,7 +35,7 @@ repeat 5 {
 	    if dist < t_dist then
 	    	t_dist = dist;
 	    	t_idx = j
-	    else 
+	    else
 	    	skip
 	    end;
 	    j = j + 1;
@@ -83,4 +83,3 @@ repeat 5 {
 	dist = 0.0;
 	t_dist = 0.0;
 }
-

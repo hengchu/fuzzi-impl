@@ -21,6 +21,8 @@ import Control.Monad
 import System.Exit
 import Debug.Trace
 
+import Examples
+
 cpat1 :: CmdPattern
 cpat1 = [cpat|
 while v(x) + 1 do
@@ -728,6 +730,12 @@ unitTests = do
   assert "prog30 should sens check"
     $ expectMaxEps 100 (expandProg prog30)
     && expectMaxSens [("x", 1), ("y", 0)] (expandProg prog30)
+  assert "mnist100 should sens check"
+    $ expectMaxEps 102 (expandProg mnist100)
+    && expectMaxSens [("j_sum", 0)] (expandProg mnist100)
+  assert "kmeans should sens check"
+    $ expectMaxEps 135 (expandProg kmeans)
+    && expectMaxSens [("cs", 0)] (expandProg kmeans)
 
 main :: IO ()
 main = do

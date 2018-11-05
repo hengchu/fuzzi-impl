@@ -132,15 +132,15 @@ while v(idx) < e(n_parts) do
   v(idx) = v(idx) + 1;
 end;
 
-v(idx) = 0;
-v(out_idx) = {};
-length(v(out_idx)) = length(v(in));
-while v(idx) < length(v(in)) do
-  v(t_in) = (v(in))[v(idx)];
-  { c(body) };
-  v(out_idx)[v(idx)] = v(t_out);
-  v(idx) = v(idx) + 1;
-end;
+  v(idx) = 0;
+  v(out_idx) = {};
+  length(v(out_idx)) = length(v(in));
+  while v(idx) < length(v(in)) do
+    v(t_in) = (v(in))[v(idx)];
+    { c(body) };
+    v(out_idx)[v(idx)] = v(t_out);
+    v(idx) = v(idx) + 1;
+  end;
 
 while v(idx) < length(v(out_idx)) do
   v(t_idx) = (v(out_idx))[v(idx)];

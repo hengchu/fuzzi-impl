@@ -408,6 +408,9 @@ skip;
 skipFunc :: (RuleConstraints e m) => RuleFunc m
 skipFunc _ _ _ _ sctx = return [(0, sctx)]
 
+skipRule :: (RuleConstraints e m) => Rule m
+skipRule = (skipPat, skipFunc)
+
 whilePat :: CmdPattern
 whilePat = [cpat|
 while e(cond) do
@@ -659,8 +662,7 @@ amapFunc recur d p uenv tctx sctx = do
               (\x acc -> if x == t_out
                          then case (getSContext sctx) ^. (at x) of
                                 Nothing -> acc
-                                Just s | s > 0 -> acc
-                                _ -> False
+                                Just _ -> acc
                          else case (getSContext sctx) ^. (at x) of
                                 Nothing -> acc
                                 Just s | s > 0 -> False
@@ -771,7 +773,7 @@ partitionFunc recur d p uenv tctx sctx =
             all (\x -> ((getSContext sctx) ^. (at x)) == Just 0) (S.elems mvsBody)
       let s1' = [s | (eps, s) <- recur (d - 1) s1 body, allMvsZero s, eps == 0]
       when (null s1') $
-        sensFail p $ "bag map body uses other sensitive inputs"
+        sensFail p $ "partition map body uses other sensitive inputs"
 
       let s2 = sctxUpdateBulk (S.elems mvsBody ++ [t_in, idx, out_idx]) Nothing sctx
       let onlySensTOut sctx =
@@ -779,8 +781,7 @@ partitionFunc recur d p uenv tctx sctx =
               (\x acc -> if x == t_out
                          then case (getSContext sctx) ^. (at x) of
                                 Nothing -> acc
-                                Just s | s > 0 -> acc
-                                _ -> False
+                                Just _ -> acc
                          else case (getSContext sctx) ^. (at x) of
                                 Nothing -> acc
                                 Just s | s > 0 -> False
@@ -789,7 +790,7 @@ partitionFunc recur d p uenv tctx sctx =
               mvsBody
       let s2' = [s | (eps, s) <- recur (d - 1) s2 body, onlySensTOut s, eps == 0 ]
       when (null s2') $
-        sensFail p $ "bag map body is not resetting outputs other than t_out"
+        sensFail p $ "partition map body is not resetting outputs other than t_out"
 
       let s_in = (getSContext sctx) ^. (at vin)
 
@@ -858,7 +859,7 @@ repeatFunc recur d p uenv tctx sctx = do
                 (e', s') <- go (n-1) s
                 return (e + e', s')
 
-      return $ go count sctx
+      return $ go count (sctxtUpdate idx (Just 0) sctx)
     _ -> sensFail p $ "failed to match any repeat command"
 
 repeatRule :: (RuleConstraints e m) => Recur -> Rule m
@@ -873,7 +874,7 @@ step :: Int
 step _ _    _    []            _ = []
 step d tctx sctx ((p, f):more) c =
   case (runReader (runExceptT go) (ContextPair tctx sctx)) of
-    Left err ->  {- traceShow err $ -} step d tctx sctx more c
+    Left err -> {- traceShow err $ -} step d tctx sctx more c
     Right results -> results ++ (step d tctx sctx more c)
   where cp = cmdPosn c
         go = do
@@ -910,6 +911,7 @@ fuzziTypingRules recur = [ assignRule
                          , lengthAssignRule
                          , lengthAssignRule2
                          , laplaceRule
+                         , skipRule
                          , whileRule recur
                          , ifRule recur
                          , blockRule recur
