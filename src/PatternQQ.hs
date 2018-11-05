@@ -20,6 +20,19 @@ cmd = QuasiQuoter { quoteExp = quoteCmd
                   , quoteDec = fail
                   }
 
+quoteExpr :: String -> Q Exp
+quoteExpr input = do
+  case P.parse P.parseExpr input of
+    Left err -> fail err
+    Right e -> dataToExpQ (const Nothing) e
+
+expr :: QuasiQuoter
+expr = QuasiQuoter { quoteExp = quoteExpr
+                   , quotePat = fail
+                   , quoteType = fail
+                   , quoteDec = fail
+                   }
+
 quoteProg :: String -> Q Exp
 quoteProg input = do
   case P.parse P.parseProg input of

@@ -15,6 +15,7 @@ fuzziExpansionRules = [ bmapExpansionRule
                       , amapExpansionRule
                       , partitionExpansionRule
                       , bsumExpansionRule
+                      , clearExpansionArrayRule
                       ]
 
 expandPrefix :: Cmd -> ExpansionRule -> Cmd
@@ -97,7 +98,17 @@ amap(v(in), v(out), v(t_in), v(idx), v(t_out), c(body))
 |]
 
 amapTgt :: CmdPattern
-amapTgt = bmapTgt
+amapTgt = [cpat|
+v(idx) = 0;
+v(out) = [];
+length(v(out)) = length(v(in));
+while v(idx) < length(v(in)) do
+  v(t_in) = (v(in))[v(idx)];
+  { c(body) };
+  v(out)[v(idx)] = v(t_out);
+  v(idx) = v(idx) + 1;
+end
+|]
 
 amapExpansionRule :: ExpansionRule
 amapExpansionRule = ExpansionRule amapSrc amapTgt
@@ -120,7 +131,17 @@ while v(idx) < e(n_parts) do
   v(out)[v(idx)] = v(t_part);
   v(idx) = v(idx) + 1;
 end;
-bmap(v(in), v(out_idx), v(t_in), v(idx), v(t_out), c(body));
+
+v(idx) = 0;
+v(out_idx) = {};
+length(v(out_idx)) = length(v(in));
+while v(idx) < length(v(in)) do
+  v(t_in) = (v(in))[v(idx)];
+  { c(body) };
+  v(out_idx)[v(idx)] = v(t_out);
+  v(idx) = v(idx) + 1;
+end;
+
 while v(idx) < length(v(out_idx)) do
   v(t_idx) = (v(out_idx))[v(idx)];
   if 0 <= v(t_idx) && v(t_idx) < length(v(out_idx)) then
@@ -164,3 +185,20 @@ end
 
 bsumExpansionRule :: ExpansionRule
 bsumExpansionRule = ExpansionRule bsumSrc bsumTgt
+
+clearArraySrc :: CmdPattern
+clearArraySrc = [cpat|
+clear(v(arr), v(idx))
+|]
+
+clearArrayTgt :: CmdPattern
+clearArrayTgt = [cpat|
+v(idx) = 0;
+while v(idx) < length(v(arr)) do
+  v(arr)[v(idx)] = 0.0;
+  v(idx) = v(idx) + 1
+end;
+|]
+
+clearExpansionArrayRule :: ExpansionRule
+clearExpansionArrayRule = ExpansionRule clearArraySrc clearArrayTgt

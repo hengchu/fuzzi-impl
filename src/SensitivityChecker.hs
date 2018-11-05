@@ -84,7 +84,7 @@ instance Inj Error SensError where
 instance Inj Error ShapeError where
   inj = Shape
 
-type RuleFunc m = Position -> UniEnv -> Context -> SContext -> m [(Float, SContext)]
+type RuleFunc m = Int -> Position -> UniEnv -> Context -> SContext -> m [(Float, SContext)]
 type Rule m = (CmdPattern, RuleFunc m)
 
 askSCtxt :: ( Get c SContext
@@ -143,7 +143,7 @@ scheckExpr :: ( Get c SContext
               , Inj e ShapeError
               , MonadError e m)
            => Expr -> m (Maybe Float)
-scheckExpr (EVar p x) = do
+scheckExpr (EVar _ x) = do
   ctx <- askSCtxt
   return $ ctx ^. (at x)
 scheckExpr (ELength p e) = do
@@ -198,11 +198,11 @@ scheckExpr (EFloat _ e) = scheckExpr e
 scheckExpr (EExp _ e) = approx1 <$> scheckExpr e
 scheckExpr (ELog _ e) = approx1 <$> scheckExpr e
 scheckExpr (EClip _ e (LInt x)) = do
-  _ <- scheckExpr e
-  return $ Just (realToFrac $ 2 * x)
+  s <- scheckExpr e
+  return $ smin s $ Just (realToFrac $ 2 * x)
 scheckExpr (EClip _ e (LFloat x)) = do
-  _ <- scheckExpr e
-  return $ Just (2 * x)
+  s <- scheckExpr e
+  return $ smin s $ Just (2 * x)
 scheckExpr e@(EClip p _ _) =
   sensFail p $ "impossible: shape checker should've caught this bad clip expression " ++ show (PrettyExpr e)
 scheckExpr (EScale _ scalar vector) = do
@@ -282,7 +282,7 @@ v(x) = e(y);
 |]
 
 assignRuleFunc :: (RuleConstraints e m) => RuleFunc m
-assignRuleFunc p uenv tctx sctx = do
+assignRuleFunc _ p uenv tctx sctx = do
   case (uenv ^. (at "x"), uenv ^. (at "y")) of
     (Just (UniVar x), Just (UniExpr e)) -> do
       s <- local (const $ ContextPair tctx sctx) $ scheckExpr e
@@ -298,7 +298,7 @@ v(x)[e(idx)] = e(y);
 |]
 
 indexAssignFunc :: (RuleConstraints e m) => RuleFunc m
-indexAssignFunc p uenv tctx sctx = do
+indexAssignFunc _ p uenv tctx sctx = do
   case (uenv ^. (at "x"), uenv ^. (at "idx"), uenv ^. (at "y")) of
     (Just (UniVar x), Just (UniExpr idx), Just (UniExpr y)) -> do
       let tx = (getContext tctx) ^. (at x)
@@ -318,13 +318,35 @@ indexAssignFunc p uenv tctx sctx = do
 indexAssignRule :: (RuleConstraints e m) => Rule m
 indexAssignRule = (indexAssignPat, indexAssignFunc)
 
+indexAssignPat2 :: CmdPattern
+indexAssignPat2 = [cpat|
+v(x)[iesc(idx)] = e(y);
+|]
+
+indexAssignFunc2 :: (RuleConstraints e m) => RuleFunc m
+indexAssignFunc2 _ p uenv tctx sctx = do
+  case (uenv ^. (at "x"), uenv ^. (at "idx"), uenv ^. (at "y")) of
+    (Just (UniVar x), Just (UniLit (LInt idx)), Just (UniExpr y)) -> do
+      let tx = (getContext tctx) ^. (at x)
+      let sx = (getSContext sctx) ^. (at x)
+      sy <- local (const $ ContextPair tctx sctx) $ scheckExpr y
+      case tx of
+        Just (TArr _ (Just len))
+          | 0 <= idx && idx < len ->
+              return [(0, sctxtUpdate x ((+) <$> sx <*> sy) sctx)]
+        _ -> sensFail p $ "only intended for fixed length arrays"
+    _ -> sensFail p $ "failed to match any indexed assignment with literal index"
+
+indexAssignRule2 :: (RuleConstraints e m) => Rule m
+indexAssignRule2 = (indexAssignPat2, indexAssignFunc2)
+
 lengthAssignPat :: CmdPattern
 lengthAssignPat = [cpat|
 length(v(x)) = e(y);
 |]
 
 lengthAssignFunc :: (RuleConstraints e m) => RuleFunc m
-lengthAssignFunc p uenv tctx sctx = do
+lengthAssignFunc _ p uenv tctx sctx = do
   case (uenv ^. (at "x"), uenv ^. (at "y")) of
     (Just (UniVar x), Just (UniExpr y)) -> do
       sy <- local (const $ ContextPair tctx sctx) $ scheckExpr y
@@ -335,8 +357,30 @@ lengthAssignFunc p uenv tctx sctx = do
         _ -> sensFail p $ "length assignment may not co-terminate"
     _ -> sensFail p $ "failed to match any length assignment command"
 
+lengthAssignPat2 :: CmdPattern
+lengthAssignPat2 = [cpat|
+length(v(x)) = length(e(y));
+|]
+
+lengthAssignFunc2 :: (RuleConstraints e m) => RuleFunc m
+lengthAssignFunc2 _ p uenv tctx sctx = do
+  case (uenv ^. (at "x"), uenv ^. (at "y")) of
+    (Just (UniVar x), Just (UniExpr y)) -> do
+      sy <- local (const $ ContextPair tctx sctx) $ scheckExpr y
+      let tx = (getContext tctx) ^. (at x)
+      case (tx, sy) of
+        (Just (TArr _ _), Nothing) -> return [(0, sctxtUpdate x Nothing sctx)]
+        (Just (TArr _ _), Just _) -> return [(0, sctx)]
+        (Just (TBag _), _) -> return [(0, sctxtUpdate x Nothing sctx)]
+        _ -> sensFail p $ "length assignment may not co-terminate"
+    _ -> sensFail p $ "failed to match any length assignment command"
+
+
 lengthAssignRule :: (RuleConstraints e m) => Rule m
 lengthAssignRule = (lengthAssignPat, lengthAssignFunc)
+
+lengthAssignRule2 :: (RuleConstraints e m) => Rule m
+lengthAssignRule2 = (lengthAssignPat2, lengthAssignFunc2)
 
 laplacePat :: CmdPattern
 laplacePat = [cpat|
@@ -344,7 +388,7 @@ v(x) $= lap(fesc(b), e(y));
 |]
 
 laplaceFunc :: (RuleConstraints e m) => RuleFunc m
-laplaceFunc p uenv tctx sctx = do
+laplaceFunc _ p uenv tctx sctx = do
   case (uenv ^. (at "x"), uenv ^. (at "b"), uenv ^. (at "y")) of
     (Just (UniVar x), Just (UniLit (LFloat b)), Just (UniExpr y)) -> do
       sy <- local (const $ ContextPair tctx sctx) $ scheckExpr y
@@ -362,7 +406,7 @@ skip;
 |]
 
 skipFunc :: (RuleConstraints e m) => RuleFunc m
-skipFunc _ _ _ sctx = return [(0, sctx)]
+skipFunc _ _ _ _ sctx = return [(0, sctx)]
 
 whilePat :: CmdPattern
 whilePat = [cpat|
@@ -371,18 +415,18 @@ while e(cond) do
 end
 |]
 
-type Recur = SContext -> Cmd -> [(Float, SContext)]
+type Recur = Int -> SContext -> Cmd -> [(Float, SContext)]
 
 whileFunc :: (RuleConstraints e m)
           => Recur
           -> RuleFunc m
-whileFunc recur p uenv tctx sctx = do
+whileFunc recur d p uenv tctx sctx = do
   case (uenv ^. (at "cond"), uenv ^. (at "body")) of
     (Just (UniExpr cond), Just (UniCmd body)) -> do
       scond <- local (const $ ContextPair tctx sctx) $ scheckExpr cond
       case scond of
         Just 0 -> do
-          let bodyContexts = recur sctx body
+          let bodyContexts = recur (d - 1) sctx body
           return [c | c <- bodyContexts, c ^._2 == sctx, c^._1 == 0]
         _ -> sensFail p $ "expecting while condition to be 0 sensitive"
     _ -> sensFail p $ "failed to match any while command"
@@ -401,16 +445,21 @@ end
 |]
 
 ifFunc :: (RuleConstraints e m) => Recur -> RuleFunc m
-ifFunc recur p uenv tctx sctx = do
+ifFunc recur d p uenv tctx sctx = do
   case (uenv ^. (at "cond"), uenv ^. (at "body1"), uenv ^. (at "body2")) of
     (Just (UniExpr cond), Just (UniCmd ct), Just (UniCmd cf)) -> do
       scond <- local (const $ ContextPair tctx sctx) $ scheckExpr cond
       case scond of
         Just 0 -> do
-          let ctxs1 = recur sctx ct
-          let ctxs2 = recur sctx cf
+          let ctxs1 = recur (d - 1) sctx ct
+          let ctxs2 = recur (d - 1) sctx cf
           return [(max e1 e2, sctxtMax c1 c2) | (e1, c1) <- ctxs1, (e2, c2) <- ctxs2]
-        _ -> sensFail p $ "expecting if condition to be 0 sensitive"
+        _ -> do
+          let s1 = recur (d - 1) sctx ct
+          let s2 = recur (d - 2) sctx cf
+          mvsBody <- S.union <$> mvs ct <*> mvs cf
+          return [(max e1 e2, sctxUpdateBulk (S.elems mvsBody) Nothing $ sctxtMax c1 c2)
+                 | (e1, c1) <- s1, (e2, c2) <- s2]
     _ -> sensFail p $ "failed to match any if command"
 
 ifRule :: (RuleConstraints e m) => Recur -> Rule m
@@ -425,13 +474,50 @@ blockPat = [cpat|
 |]
 
 blockFunc :: (RuleConstraints e m) => Recur -> RuleFunc m
-blockFunc recur p uenv tctx sctx = do
+blockFunc recur d p uenv _ sctx = do
   case uenv ^. (at "body") of
-    Just (UniCmd body) -> return $ recur sctx body
+    Just (UniCmd body) -> return $ recur (d - 1) sctx body
     _ -> sensFail p $ "failed to match any block"
 
 blockRule :: (RuleConstraints e m) => Recur -> Rule m
 blockRule recur = (blockPat, blockFunc recur)
+
+clearBagPat :: CmdPattern
+clearBagPat = [cpat|
+v(x) = {};
+length(v(x)) = length(e(y))
+|]
+
+clearBagFunc :: (RuleConstraints e m) => RuleFunc m
+clearBagFunc _ p uenv tctx sctx = do
+  case (uenv ^. (at "x"), uenv ^. (at "y")) of
+    (Just (UniVar x), Just (UniExpr y)) -> do
+      ty <- local (const $ ContextPair tctx sctx) $ checkExpr y
+      case ty of
+        TBag _ -> do
+          sy <- local (const $ ContextPair tctx sctx) $ scheckExpr y
+          return [(0, sctxtUpdate x sy sctx)]
+        _ -> sensFail p $ "clearBag rule only applies to bags"
+    _ -> sensFail p $ "failed to match any clear bag commands"
+
+clearBagRule :: (RuleConstraints e m) => Rule m
+clearBagRule = (clearBagPat, clearBagFunc)
+
+clearArrayPat :: CmdPattern
+clearArrayPat = clearArrayTgt
+
+clearArrayFunc :: (RuleConstraints e m) => RuleFunc m
+clearArrayFunc _ p uenv tctx sctx = do
+  case (uenv ^. (at "arr"), uenv ^. (at "idx")) of
+    (Just (UniVar arr), Just (UniVar idx)) -> do
+      let t_arr = (getContext tctx) ^. (at arr)
+      case t_arr of
+        Just (TArr _ _) -> return [(0, sctxtUpdate arr (Just 0) sctx)]
+        _ -> sensFail p $ "expecting an array for clear array"
+    _ -> sensFail p $ "failed to match any clear array"
+
+clearArrayRule :: (RuleConstraints e m) => Rule m
+clearArrayRule = (clearArrayPat, clearArrayFunc)
 
 determ :: (RuleConstraints e m) => Cmd -> m Bool
 determ (CLaplace _ _ _ _) = return False
@@ -457,7 +543,7 @@ mvs (CBlock _ c) = mvs c
 mvs (CExt p _ _) = sensFail p $ "unexpanded extension"
 
 bmapFunc :: (RuleConstraints e m) => Recur -> RuleFunc m
-bmapFunc recur p uenv tctx sctx = do
+bmapFunc recur d p uenv tctx sctx = do
   case ( uenv ^. (at "in")
        , uenv ^. (at "out")
        , uenv ^. (at "t_in")
@@ -492,7 +578,7 @@ bmapFunc recur p uenv tctx sctx = do
                                       (sctxtUpdate t_in (Just 0) sctx)
       let allMvsZero sctx =
             all (\x -> ((getSContext sctx) ^. (at x)) == Just 0) (S.elems mvsBody)
-      let s1' = [s | (eps, s) <- recur s1 body, allMvsZero s, eps == 0]
+      let s1' = [s | (eps, s) <- recur (d - 1) s1 body, allMvsZero s, eps == 0]
       when (null s1') $
         sensFail p $ "bag map body uses other sensitive inputs"
       let s2 = sctxUpdateBulk (S.elems mvsBody ++ [t_in, idx, vout]) Nothing sctx
@@ -501,15 +587,14 @@ bmapFunc recur p uenv tctx sctx = do
               (\x acc -> if x == t_out
                          then case (getSContext sctx) ^. (at x) of
                                 Nothing -> acc
-                                Just s | s > 0 -> acc
-                                Just 0 -> False
+                                Just _ -> acc
                          else case (getSContext sctx) ^. (at x) of
                                 Nothing -> acc
                                 Just s | s > 0 -> False
-                                Just 0 -> acc)
+                                _ -> acc)
               True
               mvsBody
-      let s2' = [s | (eps, s) <- recur s2 body, onlySensTOut s ]
+      let s2' = [s | (eps, s) <- recur (d - 1) s2 body, onlySensTOut s, eps == 0 ]
       when (null s2') $
         sensFail p $ "bag map body is not resetting outputs other than t_out"
       let s_in = (getSContext sctx) ^. (at vin)
@@ -523,21 +608,278 @@ bmapFunc recur p uenv tctx sctx = do
 bmapRule :: (RuleConstraints e m) => Recur -> Rule m
 bmapRule recur = (bmapPat, bmapFunc recur)
 
-step :: Context
+amapPat :: CmdPattern
+amapPat = amapTgt
+
+amapFunc :: (RuleConstraints e m) => Recur -> RuleFunc m
+amapFunc recur d p uenv tctx sctx = do
+  case ( uenv ^. (at "in")
+       , uenv ^. (at "out")
+       , uenv ^. (at "t_in")
+       , uenv ^. (at "idx")
+       , uenv ^. (at "t_out")
+       , uenv ^. (at "body")
+       ) of
+    ( Just (UniVar vin)
+      , Just (UniVar vout)
+      , Just (UniVar t_in)
+      , Just (UniVar idx)
+      , Just (UniVar t_out)
+      , Just (UniCmd body) ) -> do
+      let tauIn = (getContext tctx) ^. (at vin)
+      let tauOut = (getContext tctx) ^. (at vout)
+
+      case (tauIn, tauOut) of
+        (Just (TArr _ _), Just (TArr _ _)) -> return ()
+        _ -> sensFail p $ "array map should be applied to arrays"
+
+      isDeterm <- determ body
+      when (not $ isDeterm) $
+        sensFail p $ "array map body is expected to be deterministic"
+      mvsBody <- mvs body
+      when (t_in `S.member` mvsBody ||
+            vin `S.member` mvsBody ||
+            vout `S.member` mvsBody ||
+            idx `S.member` mvsBody) $
+        sensFail p $ "array map body should not modify in, out, t_in or idx"
+
+      let s1 = relax $ sctxUpdateBulk (S.elems mvsBody ++ [idx, vout]) Nothing
+                       $ sctxtUpdate t_in (Just 0) sctx
+      let allMvsZero sctx =
+            all (\x -> ((getSContext sctx) ^. (at x)) == Just 0) (S.elems mvsBody)
+      let s1' = [s | (eps, s) <- recur (d - 1) s1 body, allMvsZero s, eps == 0]
+
+
+      when (null s1') $
+        sensFail p $ "array map body uses other sensitive inputs"
+
+      let s2 = sctxUpdateBulk (S.elems mvsBody ++ [t_in, idx, vout]) Nothing sctx
+      let onlySensTOut sctx =
+            S.foldr
+              (\x acc -> if x == t_out
+                         then case (getSContext sctx) ^. (at x) of
+                                Nothing -> acc
+                                Just s | s > 0 -> acc
+                                _ -> False
+                         else case (getSContext sctx) ^. (at x) of
+                                Nothing -> acc
+                                Just s | s > 0 -> False
+                                _ -> acc)
+              True
+              mvsBody
+      let s2' = [s | (eps, s) <- recur (d - 1) s2 body, onlySensTOut s, eps == 0 ]
+      when (null s2') $
+        sensFail p $ "array map body is not resetting outputs other than t_out"
+
+      let s3 = sctxUpdateBulk (S.elems mvsBody ++ [idx, vout])
+                              Nothing
+                              (sctxtUpdate t_in (Just 1) sctx)
+      let s3' = [s | (eps, s) <- recur (d - 1) s3 body, eps == 0 ]
+      when (null s3') $
+        sensFail p $ "impossible: we should have at least 1 context here"
+
+      return $ do
+        s <- s3'
+        let s_in = (getSContext sctx) ^. (at vin)
+        let s_t_out = (getSContext s) ^. (at t_out)
+        return $ (0, sctxUpdateBulk (S.elems mvsBody ++ [idx, t_out, t_in]) Nothing
+                                    (sctxtUpdate vout ((*) <$> s_in <*> s_t_out) sctx))
+    _ -> sensFail p $ "failed to match any array map command"
+
+amapRule :: (RuleConstraints e m) => Recur -> Rule m
+amapRule recur = (amapPat, amapFunc recur)
+
+partitionPat :: CmdPattern
+partitionPat = partitionTgt
+
+fvsLit :: Lit -> S.Set Var
+fvsLit (LInt _) = S.empty
+fvsLit (LFloat _) = S.empty
+fvsLit (LBool _) = S.empty
+fvsLit (LArr es) = foldr S.union S.empty (map fvs es)
+fvsLit (LBag es) = foldr S.union S.empty (map fvs es)
+
+fvs :: Expr -> S.Set Var
+fvs (EVar _ x) = S.singleton x
+fvs (ELength _ e) = fvs e
+fvs (ELit _ lit) = fvsLit lit
+fvs (EBinop _ e1 _ e2) = S.union (fvs e1) (fvs e2)
+fvs (EIndex _ e1 e2) = S.union (fvs e1) (fvs e2)
+fvs (ERAccess _ e _) = fvs e
+fvs (EFloat _ e) = fvs e
+fvs (EExp _ e) = fvs e
+fvs (ELog _ e) = fvs e
+fvs (EClip _ e lit) = S.union (fvs e) (fvsLit lit)
+fvs (EScale _ e1 e2) = S.union (fvs e1) (fvs e2)
+fvs (EDot _ e1 e2) = S.union (fvs e1) (fvs e2)
+
+partitionFunc :: (RuleConstraints e m) => Recur -> RuleFunc m
+partitionFunc recur d p uenv tctx sctx =
+  case ( uenv ^. (at "in")
+       , uenv ^. (at "out")
+       , uenv ^. (at "t_in")
+       , uenv ^. (at "idx")
+       , uenv ^. (at "t_out")
+       , uenv ^. (at "t_idx")
+       , uenv ^. (at "out_idx")
+       , uenv ^. (at "t_part")
+       , uenv ^. (at "n_parts")
+       , uenv ^. (at "body")
+       , (subst @Cmd partitionTgt uenv) >>= recover @Cmd
+       ) of
+    ( Just (UniVar vin)
+      , Just (UniVar vout)
+      , Just (UniVar t_in)
+      , Just (UniVar idx)
+      , Just (UniVar t_out)
+      , Just (UniVar t_idx)
+      , Just (UniVar out_idx)
+      , Just (UniVar t_part)
+      , Just (UniExpr n_parts)
+      , Just (UniCmd body)
+      , Just partitionCmd
+      ) -> do
+
+      let tauIn = (getContext tctx) ^. (at vin)
+      let tauOut = (getContext tctx) ^. (at vout)
+
+      case (tauIn, tauOut) of
+        (Just (TBag t), Just (TArr (TBag t') _)) | t == t' -> return ()
+        _ -> sensFail p $ "partition should be applied to bags with arrays of bags as output"
+
+      isDeterm <- determ body
+      when (not $ isDeterm) $
+        sensFail p $ "partition body is expected to be deterministic"
+
+      mvsBody <- mvs body
+      when (t_in `S.member` mvsBody ||
+            vin `S.member` mvsBody ||
+            vout `S.member` mvsBody ||
+            idx `S.member` mvsBody ||
+            out_idx `S.member` mvsBody) $
+        sensFail p $ "partition body should not modify in, out, t_in, idx or out_idx"
+
+      let fvsNParts = fvs n_parts
+      mvsPartition <- mvs partitionCmd
+      when (not $ S.disjoint fvsNParts mvsPartition) $
+        sensFail p $ "free variables of n_parts should not be modified by the partition command"
+
+      let s1 = relax $ sctxUpdateBulk (S.elems mvsBody ++ [idx, out_idx])
+                                      Nothing
+                                      (sctxtUpdate t_in (Just 0) sctx)
+      let allMvsZero sctx =
+            all (\x -> ((getSContext sctx) ^. (at x)) == Just 0) (S.elems mvsBody)
+      let s1' = [s | (eps, s) <- recur (d - 1) s1 body, allMvsZero s, eps == 0]
+      when (null s1') $
+        sensFail p $ "bag map body uses other sensitive inputs"
+
+      let s2 = sctxUpdateBulk (S.elems mvsBody ++ [t_in, idx, out_idx]) Nothing sctx
+      let onlySensTOut sctx =
+            S.foldr
+              (\x acc -> if x == t_out
+                         then case (getSContext sctx) ^. (at x) of
+                                Nothing -> acc
+                                Just s | s > 0 -> acc
+                                _ -> False
+                         else case (getSContext sctx) ^. (at x) of
+                                Nothing -> acc
+                                Just s | s > 0 -> False
+                                _ -> acc)
+              True
+              mvsBody
+      let s2' = [s | (eps, s) <- recur (d - 1) s2 body, onlySensTOut s, eps == 0 ]
+      when (null s2') $
+        sensFail p $ "bag map body is not resetting outputs other than t_out"
+
+      let s_in = (getSContext sctx) ^. (at vin)
+
+      return [(0, sctxUpdateBulk [vout, out_idx] s_in
+                  $ sctxUpdateBulk (S.elems mvsPartition) Nothing sctx)]
+
+    _ -> sensFail p $ "failed to match any partition commands"
+
+partitionRule :: (RuleConstraints e m) => Recur -> Rule m
+partitionRule recur = (partitionPat, partitionFunc recur)
+
+bsumPat :: CmdPattern
+bsumPat = bsumTgt
+
+bsumFunc :: (RuleConstraints e m) => RuleFunc m
+bsumFunc d p uenv tctx sctx = do
+  case ( uenv ^. (at "in")
+       , uenv ^. (at "out")
+       , uenv ^. (at "idx")
+       , uenv ^. (at "t_in")
+       , uenv ^. (at "bound")
+       ) of
+    (Just (UniVar vin)
+      , Just (UniVar vout)
+      , Just (UniVar idx)
+      , Just (UniVar t_in)
+      , Just (UniLit (LFloat bound))
+      ) -> do
+      when (bound < 0) $
+        sensFail p "bag sum bound should be positive"
+
+      let s_in = (getSContext sctx) ^. (at vin)
+      return [(0, sctxtUpdate vout ((*bound) <$> s_in) $ sctxUpdateBulk [idx, t_in] Nothing sctx)]
+    _ -> sensFail p $ "failed to match any bag sum commands"
+
+bsumRule :: (RuleConstraints e m) => Rule m
+bsumRule = (bsumPat, bsumFunc)
+
+repeatPat :: CmdPattern
+repeatPat = [cpat|
+v(idx) = 0;
+while v(idx) < iesc(count) do
+  { c(body) };
+  v(idx) = v(idx) + 1
+end
+|]
+
+repeatFunc :: (RuleConstraints e m) => Recur -> RuleFunc m
+repeatFunc recur d p uenv tctx sctx = do
+  case ( uenv ^. (at "idx")
+       , uenv ^. (at "count")
+       , uenv ^. (at "body")
+       ) of
+    (Just (UniVar idx)
+      , Just (UniLit (LInt count))
+      , Just (UniCmd body)
+      ) -> do
+      mvsBody <- mvs body
+      when (idx `S.member` mvsBody) $
+        sensFail p $ "repeat loop should not modify index"
+
+      let go n sctx
+            | n <= 0 = [(0, sctx)]
+            | otherwise = do
+                (e, s) <- recur (d - 1) sctx body
+                (e', s') <- go (n-1) s
+                return (e + e', s')
+
+      return $ go count sctx
+    _ -> sensFail p $ "failed to match any repeat command"
+
+repeatRule :: (RuleConstraints e m) => Recur -> Rule m
+repeatRule recur = (repeatPat, repeatFunc recur)
+
+step :: Int
+     -> Context
      -> SContext
      -> [Rule (ExceptT Error (Reader ContextPair))]
      -> Cmd
      -> [(Float, SContext, Maybe Cmd)]
-step _    _    []            _ = []
-step tctx sctx ((p, f):more) c =
+step _ _    _    []            _ = []
+step d tctx sctx ((p, f):more) c =
   case (runReader (runExceptT go) (ContextPair tctx sctx)) of
-    Left _ -> step tctx sctx more c
-    Right results -> results ++ (step tctx sctx more c)
+    Left err ->  {- traceShow err $ -} step d tctx sctx more c
+    Right results -> results ++ (step d tctx sctx more c)
   where cp = cmdPosn c
         go = do
           case runUniM $ matchCmdPrefix p c of
             Right (uenv, remain) -> do
-              results <- f cp uenv tctx sctx
+              results <- f d cp uenv tctx sctx
               return [(fst es, snd es, remain)| es <- results]
             Left _ -> return []
 
@@ -548,14 +890,13 @@ search :: Context
        -> Int
        -> [(Float, SContext, Maybe Cmd)]
 search _    _    _     _ d | d <= 0 = []
-search _    _    []    _ _     = []
 search tctx sctx rules c depth = do
-  r <- step tctx sctx rules c
+  r <- step depth tctx sctx rules c
   case r ^._3 of
     Nothing -> return r
     Just remain -> do
-      (eps, sctx, remain') <- search tctx (r ^._2) rules remain (depth - 1)
-      return (r ^._1 + eps, sctx, remain')
+      r2 <- search tctx (r ^._2) rules remain (depth - 1)
+      return (r ^._1 + r2 ^._1 , r2 ^._2, r2 ^._3)
 
 declsToSContext :: [Decl] -> SContext
 declsToSContext decls = SContext . M.fromList $ go decls
@@ -565,12 +906,20 @@ declsToSContext decls = SContext . M.fromList $ go decls
 fuzziTypingRules :: Recur -> [Rule (ExceptT Error (Reader ContextPair))]
 fuzziTypingRules recur = [ assignRule
                          , indexAssignRule
+                         , indexAssignRule2
                          , lengthAssignRule
+                         , lengthAssignRule2
                          , laplaceRule
                          , whileRule recur
                          , ifRule recur
-                         , bmapRule recur
                          , blockRule recur
+                         , bmapRule recur
+                         , amapRule recur
+                         , partitionRule recur
+                         , bsumRule
+                         , clearBagRule
+                         , clearArrayRule
+                         , repeatRule recur
                          ]
 
 runSensitivityChecker :: Prog -> Int -> Either ShapeError [(Float, SContext)]
@@ -583,7 +932,7 @@ runSensitivityChecker p@(Prog decls cmd) depth =
         recur depth sctx cmd
           | depth <= 0 = []
           | otherwise = do
-              result <- search tctx sctx (fuzziTypingRules (recur $ depth - 1)) cmd depth
+              result <- search tctx sctx (fuzziTypingRules recur) cmd depth
               case result ^._3 of
                 Just _ -> []
                 Nothing -> return (result ^._1, result ^._2)

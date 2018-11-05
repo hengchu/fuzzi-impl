@@ -23,53 +23,60 @@ $eol        = [\n\r]
 
 tokens :-
 
-$whitespace                   ;
-$eol                          ;
-"("                           { tokAct $ \p _ -> TLParen p }
-")"                           { tokAct $ \p _ -> TRParen p }
-","                           { tokAct $ \p _ -> TComma p }
-"["                           { tokAct $ \p _ -> TLBrack p }
-"]"                           { tokAct $ \p _ -> TRBrack p }
-"{"                           { tokAct $ \p _ -> TLBrace p }
-"}"                           { tokAct $ \p _ -> TRBrace p }
-":"                           { tokAct $ \p _ -> TColon p }
-";"                           { tokAct $ \p _ -> TSemiColon p }
-"+"                           { tokAct $ \p _ -> TPlus p }
-"-"                           { tokAct $ \p _ -> TMinus p }
-"*"                           { tokAct $ \p _ -> TMult p }
-"/"                           { tokAct $ \p _ -> TDiv p }
-"."                           { tokAct $ \p _ -> TDot p }
-"<"                           { tokAct $ \p _ -> TLt p }
-"<="                          { tokAct $ \p _ -> TLe p }
-">"                           { tokAct $ \p _ -> TGt p }
-">="                          { tokAct $ \p _ -> TGe p }
-"!="                          { tokAct $ \p _ -> TNeq p }
-"&&"                          { tokAct $ \p _ -> TAnd p }
-"||"                          { tokAct $ \p _ -> TOr p }
-"$="                          { tokAct $ \p _ -> TSample p }
-"=="                          { tokAct $ \p _ -> TEqEq p }
-"="                           { tokAct $ \p _ -> TEq p }
-"exp"                         { tokAct $ \p _ -> TExp p }
-"log"                         { tokAct $ \p _ -> TLog p }
-"lap"                         { tokAct $ \p _ -> TLaplace p }
-"length"                      { tokAct $ \p _ -> TLength p }
-"clip"                        { tokAct $ \p _ -> TClip p }
-"scale"                       { tokAct $ \p _ -> TScale p }
-"dot"                         { tokAct $ \p _ -> TDotP p }
-"true"                        { tokAct $ \p _ -> TTrue p }
-"false"                       { tokAct $ \p _ -> TFalse p }
-"if"                          { tokAct $ \p _ -> TIf p }
-"then"                        { tokAct $ \p _ -> TThen p }
-"else"                        { tokAct $ \p _ -> TElse p }
-"end"                         { tokAct $ \p _ -> TEnd p }
-"do"                          { tokAct $ \p _ -> TDo p }
-"while"                       { tokAct $ \p _ -> TWhile p }
-"repeat"                      { tokAct $ \p _ -> TRepeat p }
-"skip"                        { tokAct $ \p _ -> TSkip p }
-"fc"                          { tokAct $ \p _ -> TFCast p }
-@identifier                   { ident }
-@float                        { float }
-@number                       { int }
+<comment>"*/"                         { begin 0 }
+<comment>.                            ;
+<comment>$eol                         ;
+<comment>$whitespace                   ;
+
+<0>"/*"                          { begin comment }
+
+<0>$whitespace                   ;
+<0>$eol                          ;
+<0>"("                           { tokAct $ \p _ -> TLParen p }
+<0>")"                           { tokAct $ \p _ -> TRParen p }
+<0>","                           { tokAct $ \p _ -> TComma p }
+<0>"["                           { tokAct $ \p _ -> TLBrack p }
+<0>"]"                           { tokAct $ \p _ -> TRBrack p }
+<0>"{"                           { tokAct $ \p _ -> TLBrace p }
+<0>"}"                           { tokAct $ \p _ -> TRBrace p }
+<0>":"                           { tokAct $ \p _ -> TColon p }
+<0>";"                           { tokAct $ \p _ -> TSemiColon p }
+<0>"+"                           { tokAct $ \p _ -> TPlus p }
+<0>"-"                           { tokAct $ \p _ -> TMinus p }
+<0>"*"                           { tokAct $ \p _ -> TMult p }
+<0>"/"                           { tokAct $ \p _ -> TDiv p }
+<0>"."                           { tokAct $ \p _ -> TDot p }
+<0>"<"                           { tokAct $ \p _ -> TLt p }
+<0>"<="                          { tokAct $ \p _ -> TLe p }
+<0>">"                           { tokAct $ \p _ -> TGt p }
+<0>">="                          { tokAct $ \p _ -> TGe p }
+<0>"!="                          { tokAct $ \p _ -> TNeq p }
+<0>"&&"                          { tokAct $ \p _ -> TAnd p }
+<0>"||"                          { tokAct $ \p _ -> TOr p }
+<0>"$="                          { tokAct $ \p _ -> TSample p }
+<0>"=="                          { tokAct $ \p _ -> TEqEq p }
+<0>"="                           { tokAct $ \p _ -> TEq p }
+<0>"exp"                         { tokAct $ \p _ -> TExp p }
+<0>"log"                         { tokAct $ \p _ -> TLog p }
+<0>"lap"                         { tokAct $ \p _ -> TLaplace p }
+<0>"length"                      { tokAct $ \p _ -> TLength p }
+<0>"clip"                        { tokAct $ \p _ -> TClip p }
+<0>"scale"                       { tokAct $ \p _ -> TScale p }
+<0>"dot"                         { tokAct $ \p _ -> TDotP p }
+<0>"true"                        { tokAct $ \p _ -> TTrue p }
+<0>"false"                       { tokAct $ \p _ -> TFalse p }
+<0>"if"                          { tokAct $ \p _ -> TIf p }
+<0>"then"                        { tokAct $ \p _ -> TThen p }
+<0>"else"                        { tokAct $ \p _ -> TElse p }
+<0>"end"                         { tokAct $ \p _ -> TEnd p }
+<0>"do"                          { tokAct $ \p _ -> TDo p }
+<0>"while"                       { tokAct $ \p _ -> TWhile p }
+<0>"repeat"                      { tokAct $ \p _ -> TRepeat p }
+<0>"skip"                        { tokAct $ \p _ -> TSkip p }
+<0>"fc"                          { tokAct $ \p _ -> TFCast p }
+<0>@identifier                   { ident }
+<0>@float                        { float }
+<0>@number                       { int }
 
 {
 

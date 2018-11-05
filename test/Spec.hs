@@ -67,7 +67,7 @@ amap(in2, out2, t_in2, i2, t_out2, t_out2 = t_in2)
 prog2' :: Cmd
 prog2' = [cmd|
 i = 0;
-out = {};
+out = [];
 length(out) = length(in);
 while i < length(in) do
   t_in = (in)[i];
@@ -77,7 +77,7 @@ while i < length(in) do
   i = i + 1;
 end;
 i2 = 0;
-out2 = {};
+out2 = [];
 length(out2) = length(in2);
 while i2 < length(in2) do
   t_in2 = (in2)[i2];
@@ -335,7 +335,6 @@ t_in : int;
 t_out : float
 
 bmap(in, out, t_in, idx, t_out, { t_out = fc(t_in); });
-amap(in, out, t_in, idx, t_out, { t_out = fc(t_in); });
 |]
 
 prog8 :: Prog
@@ -443,7 +442,7 @@ prog18 = [prog|
 x : int
 
 while x < 10 do
-  x = x + 1;
+  { x = x + 1; }
 end
 |]
 
@@ -453,9 +452,9 @@ x :[1.0] int;
 y : int
 
 if y > 0 then
-  x = 2 * x;
+  { x = 2 * x; }
 else
-  x = 3 * x;
+  { x = 3 * x; }
 end
 |]
 
@@ -464,12 +463,12 @@ prog20 = [prog|
 x :[1.0] float;
 y : int
 
-if y > 0 then
+if y > 0 then {
   x = 2.0 * x;
-else
+} else {
   x = 3.0 * x;
   x $= lap(1.0, x);
-end
+} end
 |]
 
 prog21 :: Prog
@@ -504,6 +503,134 @@ bmap(x, y, t_in, i, t_out, {
     i2 = 0;
     t_out2 = 0.0
 });
+|]
+
+prog23 :: Prog
+prog23 = [prog|
+x :[1.0] [[float]];
+y : [[float]];
+t_in : [float];
+i : int;
+t_out : [float];
+
+t_in2 : float;
+i2 : int;
+t_out2 : float
+
+amap(x, y, t_in, i, t_out, {
+    amap(t_in, t_out, t_in2, i2, t_out2, {
+      t_out2 = t_in2 * 2.0;
+    });
+
+    t_in2 = 0.0;
+    i2 = 0;
+    t_out2 = 0.0
+});
+|]
+
+prog24 :: Prog
+prog24 = [prog|
+x :[1.0] {float};
+y : {float}
+
+x = {};
+length(x) = length(y)
+|]
+
+prog25 :: Prog
+prog25 = [prog|
+x : [float];
+y : [float]
+
+length(x) = length(y)
+|]
+
+prog26 :: Prog
+prog26 = [prog|
+x :[1.0] float;
+y : float
+
+{ y = x * 2.0 }
+|]
+
+prog27 :: Prog
+prog27 = [prog|
+x : [1.0] {{{float}}};
+y : {{{float}}};
+t_in : {{float}};
+i : int;
+t_out : {{float}};
+
+t_in2 : {float};
+i2 : int;
+t_out2 : {float};
+
+t_in3 : float;
+i3 : int;
+t_out3 : float
+
+bmap(x, y, t_in, i, t_out, {
+    bmap(t_in, t_out, t_in2, i2, t_out2, {
+      bmap(t_in2, t_out2, t_in3, i3, t_out3, {
+        t_out3 = t_in3 * 2.0;
+      });
+
+      t_in3 = 0.0;
+      i3 = 0;
+      t_out3 = 0.0
+    });
+
+    t_in3 = 0.0;
+    i3 = 0;
+    t_out3 = 0.0;
+
+    t_in2 = {};
+    i2 = 0;
+    t_out2 = {}
+});
+|]
+
+prog28 :: Prog
+prog28 = [prog|
+x :[1.0] {float};
+y : [{float}];
+t_in: float;
+idx : int;
+t_out: int;
+t_idx: int;
+out_idx: {int};
+t_part:{float}
+
+partition(x, y, t_in, idx, t_out, t_idx, out_idx, t_part, 2, {
+  if t_in > 5.0 then
+    t_out = 0;
+  else
+    t_out = 1;
+  end
+});
+|]
+
+prog29 :: Prog
+prog29 = [prog|
+x :[1.0] {float};
+y : float;
+i : int;
+t_in: float
+
+bsum(x, y, i, t_in, 2.0);
+|]
+
+prog30 :: Prog
+prog30 = [prog|
+x :[1.0] float;
+y : float;
+i : int
+
+i = 0;
+while i < 100 do
+  { y $= lap(1.0, x); };
+  i = i + 1
+end
 |]
 
 expectMaxEps :: Float -> Prog -> Bool
@@ -580,6 +707,27 @@ unitTests = do
   assert "prog21 should sens check"
     $ expectMaxEps 0 (expandProg prog21)
     && expectMaxSens [("y", 1)] (expandProg prog21)
+  assert "prog22 should sens check"
+    $ expectMaxEps 0 (expandProg prog22)
+    && expectMaxSens [("y", 1)] (expandProg prog22)
+  assert "prog23 should sens check"
+    $ expectMaxEps 0 (expandProg prog23)
+    && expectMaxSens [("y", 2)] (expandProg prog23)
+  assert "prog24 should sens check"
+    $ expectMaxEps 0 (expandProg prog24)
+    && expectMaxSens [("y", 0), ("x", 0)] (expandProg prog24)
+  assert "prog27 should sens check"
+    $ expectMaxEps 0 (expandProg prog27)
+    && expectMaxSens [("y", 1)] (expandProg prog27)
+  assert "prog28 should sens check"
+    $ expectMaxEps 0 (expandProg prog28)
+    && expectMaxSens [("x", 1), ("y", 1)] (expandProg prog28)
+  assert "prog29 should sens check"
+    $ expectMaxEps 0 (expandProg prog29)
+    && expectMaxSens [("x", 1), ("y", 2)] (expandProg prog29)
+  assert "prog30 should sens check"
+    $ expectMaxEps 100 (expandProg prog30)
+    && expectMaxSens [("x", 1), ("y", 0)] (expandProg prog30)
 
 main :: IO ()
 main = do

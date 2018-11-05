@@ -56,7 +56,7 @@ isSubRec m1 m2 =
 isCompat :: Tau -> Tau -> Bool
 isCompat (TArr t1 (Just len1)) (TArr t2 (Just len2)) =
   isCompat t1 t2 && len1 == len2
-isCompat (TArr t1 (Just _)) (TArr t2 _) =
+isCompat (TArr t1 _) (TArr t2 (Just _)) =
   isCompat t1 t2
 isCompat (TBag t1) (TBag t2) = isCompat t1 t2
 isCompat (TRec m1) (TRec m2) = isSubRec m2 m1
