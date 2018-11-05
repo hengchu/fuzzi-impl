@@ -736,6 +736,9 @@ unitTests = do
   assert "kmeans should sens check"
     $ expectMaxEps 135 (expandProg kmeans)
     && expectMaxSens [("cs", 0)] (expandProg kmeans)
+  assert "naive bayes should sens check"
+    $ expectMaxEps 59 (expandProg naiveBayes)
+    && expectMaxSens [("b", 0)] (expandProg naiveBayes)
 
 main :: IO ()
 main = do

@@ -38,10 +38,10 @@ all_lab : { float };
 
 size $= lap(1.0, float(length(db)));
 
-bmap(db, all_lab, t, i, lab, { 
-  if t[57] == 1.0 then 
+bmap(db, all_lab, t, i, lab, {
+  if t[57] == 1.0 then
     lab = 1.0;
-  else 
+  else
     lab = 0.0;
   end
 });
@@ -57,17 +57,17 @@ p_minus = (size - lab_sum) / size;
 
 j = 0;
 repeat 57 {
-  bmap(db, features_plus, t, i, wout, { 
+  bmap(db, features_plus, t, i, wout, {
     if (t[57] == 1.0) then
-      wout = t[j] 
+      wout = t[j]
     else
       wout = 0.0
     end
   });
 
-  bmap(db, features_minus, t, i, wout, { 
+  bmap(db, features_minus, t, i, wout, {
     if t[57] == 0.0 then
-      wout = t[j] 
+      wout = t[j]
     else
       wout = 0.0
     end
