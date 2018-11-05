@@ -124,17 +124,18 @@ Cmd
   | while Expr do Cmd end                     { CPWhile   (token2Position $1) $2 $4 }
   | Cmd ';'                                   { $1 }
   | Cmd ';' Cmd                               { CPSeq     (token2Position $2) $1 $3 }
+  | CmdBlock                                  { $1 }
   | ident '(' ExtensionParams ')'
   {% getIdent $1 `bindP` \ident ->
      returnP $ CPExt (token2Position $1) ident $3
   }
 
 CmdBlock
-: '{' Cmd '}' { $2 }
+: '{' Cmd '}' { CPBlock (token2Position $1) $2 }
 
 ExtensionParam
 : Expr     { PPExpr $1 }
-| CmdBlock { PPCmd $1  }
+| Cmd      { PPCmd $1  }
 
 ExtensionParams
 :                { [] }

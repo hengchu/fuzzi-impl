@@ -161,21 +161,11 @@ prettyExprPattern (EPDot _ e1 e2) _ =
 
 prettyParam :: Param -> Doc
 prettyParam (PExpr e) = prettyExpr e 0
-prettyParam (PCmd c) =
-  vcat [
-  lbrace
-  , nest 2 $ prettyCmd c
-  , rbrace
-  ]
+prettyParam (PCmd c) = prettyCmd c
 
 prettyParamPattern :: ParamPattern -> Doc
 prettyParamPattern (PPExpr e) = prettyExprPattern e 0
-prettyParamPattern (PPCmd c) =
-  vcat [
-  lbrace
-  , nest 2 $ prettyCmdPattern c
-  , rbrace
-  ]
+prettyParamPattern (PPCmd c) = prettyCmdPattern c
 
 prettyParams :: [Param] -> Doc
 prettyParams params =
@@ -213,6 +203,12 @@ prettyCmd (CSkip _) =
   text "skip"
 prettyCmd (CExt _ name params) =
   text name <> (parens $ prettyParams params)
+prettyCmd (CBlock _ c) =
+  vcat [
+  lbrace
+  , nest 2 $ prettyCmd c
+  , rbrace
+  ]
 
 prettyCmdPattern :: CmdPattern -> Doc
 prettyCmdPattern (CPWild _ x) = text "c" <> (parens $ text x)
@@ -243,6 +239,12 @@ prettyCmdPattern (CPSkip _) =
   text "skip"
 prettyCmdPattern (CPExt _ name params) =
   text name <> (parens $ prettyParamPatterns params)
+prettyCmdPattern (CPBlock _ c) =
+  vcat [
+  lbrace
+  , nest 2 $ prettyCmdPattern c
+  , rbrace
+  ]
 
 newtype PrettyCmd = PrettyCmd Cmd
   deriving (Eq, Arbitrary)

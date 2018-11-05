@@ -15,6 +15,7 @@ import Pretty
 import PatternQQ
 import ShapeChecker
 import qualified Data.Map as M
+import qualified Data.Set as S
 
 import Control.Monad.Reader
 import Control.Monad.Except
@@ -25,8 +26,14 @@ newtype SContext = SContext { getSContext :: M.Map Var Float }
   deriving (Show, Eq, Generic)
 
 sctxtUpdate :: Var -> Maybe Float -> SContext -> SContext
-sctxtUpdate x s (SContext sctxt) =
-  SContext $ M.update (const s) x sctxt
+sctxtUpdate x (Just s) (SContext sctxt) =
+  SContext $ M.insert x s sctxt
+sctxtUpdate x Nothing (SContext sctxt) =
+  SContext $ M.delete x sctxt
+
+sctxUpdateBulk :: [Var] -> Maybe Float -> SContext -> SContext
+sctxUpdateBulk xs s sctx =
+  foldr (\x acc -> sctxtUpdate x s acc) sctx xs
 
 sctxtMax :: SContext -> SContext -> SContext
 sctxtMax (SContext c1) (SContext c2) =
@@ -38,6 +45,10 @@ sctxtMax (SContext c1) (SContext c2) =
          _       -> M.delete k acc)
     M.empty
     c1
+
+relax :: SContext -> SContext
+relax (SContext sctx) =
+  SContext $ M.filter (== 0) sctx
 
 data ContextPair = ContextPair {
   context_pair_shape :: Context
@@ -134,9 +145,7 @@ scheckExpr :: ( Get c SContext
            => Expr -> m (Maybe Float)
 scheckExpr (EVar p x) = do
   ctx <- askSCtxt
-  case ctx ^. (at x) of
-    Nothing -> sensFail p $ "unknown variable: " ++ x
-    Just s -> return . Just $ s
+  return $ ctx ^. (at x)
 scheckExpr (ELength p e) = do
   t <- checkExpr e
   case t of
@@ -407,6 +416,113 @@ ifFunc recur p uenv tctx sctx = do
 ifRule :: (RuleConstraints e m) => Recur -> Rule m
 ifRule recur = (ifPat, ifFunc recur)
 
+bmapPat :: CmdPattern
+bmapPat = bmapTgt
+
+blockPat :: CmdPattern
+blockPat = [cpat|
+{ c(body) }
+|]
+
+blockFunc :: (RuleConstraints e m) => Recur -> RuleFunc m
+blockFunc recur p uenv tctx sctx = do
+  case uenv ^. (at "body") of
+    Just (UniCmd body) -> return $ recur sctx body
+    _ -> sensFail p $ "failed to match any block"
+
+blockRule :: (RuleConstraints e m) => Recur -> Rule m
+blockRule recur = (blockPat, blockFunc recur)
+
+determ :: (RuleConstraints e m) => Cmd -> m Bool
+determ (CLaplace _ _ _ _) = return False
+determ (CSeq _ c1 c2) = (&&) <$> determ c1 <*> determ c2
+determ (CIf _ _ c1 c2) = (&&) <$> determ c1 <*> determ c2
+determ (CWhile _ _ c) = determ c
+determ (CSkip _) = return True
+determ (CAssign _ _ _) = return True
+determ (CBlock _ c) = determ c
+determ (CExt p _ _) = sensFail p $ "unexpanded extension"
+
+mvs :: (RuleConstraints e m) => Cmd -> m (S.Set Var)
+mvs (CLaplace _ x _ _) = return $ S.singleton x
+mvs (CSeq _ c1 c2) = S.union <$> mvs c1 <*> mvs c2
+mvs (CIf _ _ c1 c2) = S.union <$> mvs c1 <*> mvs c2
+mvs (CWhile _ _ c) = mvs c
+mvs (CAssign _ (EVar _ x) _) = return $ S.singleton x
+mvs (CAssign _ (EIndex _ (EVar _ x) _) _) = return $ S.singleton x
+mvs (CAssign _ (ELength _ (EVar _ x)) _) = return $ S.singleton x
+mvs (CAssign p _ _) = sensFail p $ "unsupported assignment form"
+mvs (CSkip _) = return S.empty
+mvs (CBlock _ c) = mvs c
+mvs (CExt p _ _) = sensFail p $ "unexpanded extension"
+
+bmapFunc :: (RuleConstraints e m) => Recur -> RuleFunc m
+bmapFunc recur p uenv tctx sctx = do
+  case ( uenv ^. (at "in")
+       , uenv ^. (at "out")
+       , uenv ^. (at "t_in")
+       , uenv ^. (at "idx")
+       , uenv ^. (at "t_out")
+       , uenv ^. (at "body")
+       ) of
+    ( Just (UniVar vin)
+      , Just (UniVar vout)
+      , Just (UniVar t_in)
+      , Just (UniVar idx)
+      , Just (UniVar t_out)
+      , Just (UniCmd body) ) -> do
+      let tauIn = (getContext tctx) ^. (at vin)
+      let tauOut = (getContext tctx) ^. (at vout)
+
+      case (tauIn, tauOut) of
+        (Just (TBag _), Just (TBag _)) -> return ()
+        _ -> sensFail p $ "bag map should be applied to bags"
+
+      isDeterm <- determ body
+      when (not $ isDeterm) $
+        sensFail p $ "bag map body is expected to be deterministic"
+      mvsBody <- mvs body
+      when (t_in `S.member` mvsBody ||
+            vin `S.member` mvsBody ||
+            vout `S.member` mvsBody ||
+            idx `S.member` mvsBody) $
+        sensFail p $ "bag map body should not modify in, out, t_in or idx"
+      let s1 = relax $ sctxUpdateBulk (S.elems mvsBody ++ [idx, vout])
+                                      Nothing
+                                      (sctxtUpdate t_in (Just 0) sctx)
+      let allMvsZero sctx =
+            all (\x -> ((getSContext sctx) ^. (at x)) == Just 0) (S.elems mvsBody)
+      let s1' = [s | (eps, s) <- recur s1 body, allMvsZero s, eps == 0]
+      when (null s1') $
+        sensFail p $ "bag map body uses other sensitive inputs"
+      let s2 = sctxUpdateBulk (S.elems mvsBody ++ [t_in, idx, vout]) Nothing sctx
+      let onlySensTOut sctx =
+            S.foldr
+              (\x acc -> if x == t_out
+                         then case (getSContext sctx) ^. (at x) of
+                                Nothing -> acc
+                                Just s | s > 0 -> acc
+                                Just 0 -> False
+                         else case (getSContext sctx) ^. (at x) of
+                                Nothing -> acc
+                                Just s | s > 0 -> False
+                                Just 0 -> acc)
+              True
+              mvsBody
+      let s2' = [s | (eps, s) <- recur s2 body, onlySensTOut s ]
+      when (null s2') $
+        sensFail p $ "bag map body is not resetting outputs other than t_out"
+      let s_in = (getSContext sctx) ^. (at vin)
+      return $ [(0, sctxUpdateBulk
+                      (S.elems mvsBody ++ [idx, t_in])
+                      Nothing
+                      (sctxtUpdate vout s_in sctx))
+               ]
+    _ -> sensFail p $ "failed to match any bag map command"
+
+bmapRule :: (RuleConstraints e m) => Recur -> Rule m
+bmapRule recur = (bmapPat, bmapFunc recur)
+
 step :: Context
      -> SContext
      -> [Rule (ExceptT Error (Reader ContextPair))]
@@ -453,6 +569,8 @@ fuzziTypingRules recur = [ assignRule
                          , laplaceRule
                          , whileRule recur
                          , ifRule recur
+                         , bmapRule recur
+                         , blockRule recur
                          ]
 
 runSensitivityChecker :: Prog -> Int -> Either ShapeError [(Float, SContext)]

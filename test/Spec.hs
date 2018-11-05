@@ -30,59 +30,67 @@ end
 
 prog1 :: Cmd
 prog1 =  [cmd|
-bmap(in, out, t_in, i, t_out, { t_out = t_in; });
-bmap(in2, out2, t_in2, i2, t_out2, { t_out2 = t_in2; })
+bmap(in, out, t_in, i, t_out, t_out = t_in);
+bmap(in2, out2, t_in2, i2, t_out2, t_out2 = t_in2)
 |]
 
 prog1' :: Cmd
 prog1' = [cmd|
 i = 0;
+out = {};
 length(out) = length(in);
 while i < length(in) do
   t_in = (in)[i];
-  t_out = t_in;
-  (out)[idx] = t_out;
+  { t_out = t_in
+  };
+  (out)[i] = t_out;
   i = i + 1;
 end;
 i2 = 0;
+out2 = {};
 length(out2) = length(in2);
 while i2 < length(in2) do
   t_in2 = (in2)[i2];
-  t_out2 = t_in2;
-  (out2)[idx] = t_out2;
+  { t_out2 = t_in2
+  };
+  (out2)[i2] = t_out2;
   i2 = i2 + 1;
 end
 |]
 
 prog2 :: Cmd
 prog2 = [cmd|
-amap(in, out, t_in, i, t_out, { t_out = t_in; });
-amap(in2, out2, t_in2, i2, t_out2, { t_out2 = t_in2; })
+amap(in, out, t_in, i, t_out, t_out = t_in);
+amap(in2, out2, t_in2, i2, t_out2, t_out2 = t_in2)
 |]
 
 prog2' :: Cmd
 prog2' = [cmd|
 i = 0;
+out = {};
 length(out) = length(in);
 while i < length(in) do
   t_in = (in)[i];
-  t_out = t_in;
-  (out)[idx] = t_out;
+  { t_out = t_in
+  };
+  (out)[i] = t_out;
   i = i + 1;
 end;
 i2 = 0;
+out2 = {};
 length(out2) = length(in2);
 while i2 < length(in2) do
   t_in2 = (in2)[i2];
-  t_out2 = t_in2;
-  (out2)[idx] = t_out2;
+  { t_out2 = t_in2
+  };
+  (out2)[i2] = t_out2;
   i2 = i2 + 1;
 end
 |]
 
 prog3 :: Cmd
 prog3 = [cmd|
-partition(in, out, t_in, idx, t_out, t_idx, out_idx, t_part, 10, { skip; });
+partition(in, out, t_in, idx, t_out, t_idx, out_idx, t_part, 10, skip);
 |]
 
 prog3' :: Cmd
@@ -96,10 +104,12 @@ while idx < 10 do
   idx = idx + 1;
 end;
 idx = 0;
+out_idx = {};
 length(out_idx) = length(in);
 while idx < length(in) do
   t_in = (in)[idx];
-  skip;
+  { skip
+  };
   (out_idx)[idx] = t_out;
   idx = idx + 1;
 end;
@@ -144,26 +154,31 @@ end
 prog5 :: Cmd
 prog5 = [cmd|
 bmap(in, out, t_in, idx, t_out, {
-  bmap(t_in, t_out, t_in', idx', t_out', {
-    t_out' = t_in';
-  });
+  bmap(t_in, t_out, t_in', idx', t_out',
+    t_out' = t_in'
+  );
 });
 |]
 
 prog5' :: Cmd
 prog5' = [cmd|
 idx = 0;
+out = {};
 length(out) = length(in);
 while idx < length(in) do
   t_in = (in)[idx];
-  idx' = 0;
-  length(t_out) = length(t_in);
-  while idx' < length(t_in) do
-    t_in' = (t_in)[idx'];
-    t_out' = t_in';
-    (t_out)[idx] = t_out';
-    idx' = idx' + 1;
-  end;
+  { { idx' = 0;
+      t_out = {};
+      length(t_out) = length(t_in);
+      while idx' < length(t_in) do
+        t_in' = (t_in)[idx'];
+        { t_out' = t_in'
+        };
+        (t_out)[idx'] = t_out';
+        idx' = idx' + 1;
+      end
+    }
+  };
   (out)[idx] = t_out;
   idx = idx + 1;
 end
@@ -457,6 +472,40 @@ else
 end
 |]
 
+prog21 :: Prog
+prog21 = [prog|
+x :[1.0] {float};
+y : {float};
+t_in : float;
+i : int;
+t_out : float
+
+bmap(x, y, t_in, i, t_out, { t_out = 2.0 * t_in; });
+|]
+
+prog22 :: Prog
+prog22 = [prog|
+x : [1.0] {{float}};
+y : {{float}};
+t_in : {float};
+i : int;
+t_out : {float};
+
+t_in2 : float;
+i2 : int;
+t_out2 : float
+
+bmap(x, y, t_in, i, t_out, {
+    bmap(t_in, t_out, t_in2, i2, t_out2, {
+      t_out2 = t_in2 * 2.0;
+    });
+
+    t_in2 = 0.0;
+    i2 = 0;
+    t_out2 = 0.0
+});
+|]
+
 expectMaxEps :: Float -> Prog -> Bool
 expectMaxEps eps p =
   not . null $ filter (\es -> es ^._1 <= eps) (runSensitivityCheckerIgnoreError p 10000)
@@ -528,6 +577,9 @@ unitTests = do
   assert "prog20 should sens check"
     $ expectMaxEps 3 prog20
     && expectMaxSens [("x", 2)] prog20
+  assert "prog21 should sens check"
+    $ expectMaxEps 0 (expandProg prog21)
+    && expectMaxSens [("y", 1)] (expandProg prog21)
 
 main :: IO ()
 main = do
@@ -547,7 +599,7 @@ main = do
   putStrLn "*********************"
   putStrLn "*  QuickCheckTests  *"
   putStrLn "*********************"
-  let args = stdArgs{maxSize=15, maxSuccess=500, chatty=True, maxShrinks=100}
+  let args = stdArgs{maxSize=10, maxSuccess=500, chatty=True, maxShrinks=100}
   r <- quickCheckWithResult args
        $ prop_roundtrip
        .&&. prop_roundtripExpr

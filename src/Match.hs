@@ -264,6 +264,8 @@ matchCmd (CPSkip _) (CSkip _) env = return env
 matchCmd (CPExt _ name pps) (CExt _ name' ps) env
   | name == name' =
     matchPatterns matchParam pps ps env
+matchCmd (CPBlock _ cp) (CBlock _ c) env =
+  matchCmd cp c env
 matchCmd _ _ _ = justFail
 
 substCmd :: CmdPattern -> UniEnv -> Maybe CmdPattern
@@ -285,6 +287,8 @@ substCmd c@(CPSkip _) _ = Just c
 substCmd (CPExt p name params) env = do
   params' <- mapM (flip substParam env) params
   return $ CPExt p name params'
+substCmd (CPBlock p cp) env =
+  CPBlock p <$> substCmd cp env
 
 matchExprBool :: ExprPattern -> Expr -> Bool
 matchExprBool ep e =
@@ -334,7 +338,7 @@ matchCmdAnywhere cp c
       (env, remains) <- matchCmdPrefix cp c
       case remains of
         Nothing -> return (env, id)
-        Just r -> return (env, \c -> normalizeSeq $ CSeq trivialPosition c r)
+        Just r -> return (env, \c -> CSeq trivialPosition c r)
   | otherwise =
   case c of
     CSeq p c1 c2
@@ -359,6 +363,10 @@ matchCmdAnywhere cp c
       | isRight . runUniM $ matchCmdAnywhereParams cp params -> do
       (env, hole) <- matchCmdAnywhereParams cp params
       return (env, \c -> CExt p name (hole c))
+    CBlock p c
+      | isRight . runUniM $ matchCmdAnywhere cp c -> do
+          (env, hole) <- matchCmdAnywhere cp c
+          return (env, \c -> CBlock p (hole c))
     _ -> UniM . Left $ mempty
 
 class Matching a where
@@ -475,6 +483,8 @@ genMatchingAnywhereCmdPairSized pair@(MatchingPair v p) sz
     , (1, CSeq trivialPosition
         <$> arbitrary
         <*> (matching_anywhere_value <$> genMatchingAnywhereCmdPairSized pair (sz - 1)))
+    , (1, CBlock trivialPosition
+        <$> (matching_anywhere_value <$> genMatchingAnywhereCmdPairSized pair (sz - 1)))
     ]
   return $ MatchingAnywhereCmdPair v' p
 

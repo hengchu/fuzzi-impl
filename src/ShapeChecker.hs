@@ -253,8 +253,10 @@ checkCmd c@(CAssign p (EVar _ x) e) = do
     Nothing -> shapeFail p $ "assignment to unknown variable: " ++ x
     Just t -> do
       te <- checkExpr e
-      when (not $ isCompat te t) $ do
+      when (not $ isCompat t te) $ do
         shapeFail p $ "incompatible assignment: " ++ show (PrettyCmd c)
+                                                  ++ " tlhs = " ++ show t
+                                                  ++ ", trhs = " ++ show te
 checkCmd c@(CAssign p elhs@(EIndex _ (EVar _ _) _) erhs) = do
   tlhs <- checkExpr elhs
   trhs <- checkExpr erhs
@@ -298,6 +300,7 @@ checkCmd (CSeq _ c1 c2) = do
 checkCmd (CSkip _) = return ()
 checkCmd c@(CExt p _ _) =
   shapeFail p $ "unexpanded extension: " ++ show (PrettyCmd c)
+checkCmd (CBlock _ c) = checkCmd c
 
 declsToContext :: [Decl] -> Context
 declsToContext decls = Context . M.fromList $ go decls

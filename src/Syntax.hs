@@ -237,6 +237,7 @@ data Cmd = CAssign       Position Expr   Expr
          | CSeq          Position Cmd    Cmd
          | CSkip         Position
          | CExt          Position String [Param]
+         | CBlock        Position Cmd
   deriving (Generic, Show, Eq, Ord, Data)
 
 -- Turn CSeqs into a linked list, flattening all tree structures
@@ -250,6 +251,7 @@ normalizeSeq (CIf p e c1 c2) =
 normalizeSeq (CWhile p e c) =
   CWhile p e $ normalizeSeq c
 normalizeSeq (CExt p name params) = (CExt p name (fmap normalizeParam params))
+normalizeSeq (CBlock p c) = CBlock p $ normalizeSeq c
 normalizeSeq c = c
 
 normalizeParam :: Param -> Param
@@ -264,6 +266,7 @@ data CmdPattern = CPWild    Position Var
                 | CPSeq     Position CmdPattern  CmdPattern
                 | CPSkip    Position
                 | CPExt     Position String      [ParamPattern]
+                | CPBlock   Position CmdPattern
                 deriving (Generic, Show, Eq, Data)
 
 cmdToPattern :: Cmd -> CmdPattern
@@ -280,6 +283,7 @@ cmdToPattern (CSeq p c1 c2) =
 cmdToPattern (CSkip p) = CPSkip p
 cmdToPattern (CExt p name params) =
   CPExt p name (fmap paramToPattern params)
+cmdToPattern (CBlock p c) = CPBlock p $ cmdToPattern c
 
 cmdClosed :: CmdPattern -> Bool
 cmdClosed (CPWild _ _) = False
@@ -290,6 +294,7 @@ cmdClosed (CPWhile _ e c) = exprClosed e && cmdClosed c
 cmdClosed (CPSeq _ c1 c2) = cmdClosed c1 && cmdClosed c2
 cmdClosed (CPSkip _) = True
 cmdClosed (CPExt _ _ params) = all paramClosed params
+cmdClosed (CPBlock _ c) = cmdClosed c
 
 cmdRecover :: CmdPattern -> Maybe Cmd
 cmdRecover (CPWild _ _) = Nothing
@@ -307,6 +312,8 @@ cmdRecover (CPSkip p) = Just $ CSkip p
 cmdRecover (CPExt p name params) =
   CExt p name <$> (getAllJust
                      (foldMap (\pp -> AllJust $ (:[]) <$> (paramRecover pp)) params))
+cmdRecover (CPBlock p c) =
+  CBlock p <$> cmdRecover c
 
 normalizeSeqPattern :: CmdPattern -> CmdPattern
 normalizeSeqPattern (CPSeq p (CPSeq p' c1 c2) c3) =
@@ -319,6 +326,7 @@ normalizeSeqPattern (CPWhile p e c) =
   CPWhile p e $ normalizeSeqPattern c
 normalizeSeqPattern (CPExt p name params) =
   (CPExt p name (fmap normalizeParamPattern params))
+normalizeSeqPattern (CPBlock p c) = CPBlock p $ normalizeSeqPattern c
 normalizeSeqPattern c = c
 
 normalizeParamPattern :: ParamPattern -> ParamPattern
@@ -445,6 +453,8 @@ genCmdSized sz
       , (1, CExt trivialPosition
           <$> genIdent
           <*> (listOf1 $ genParamSized (sz - 1)))
+      , (1, CBlock trivialPosition
+            <$> genCmdSized (sz - 1))
       ]
 
 shrinkCmd :: Cmd -> [Cmd]
@@ -466,6 +476,8 @@ shrinkCmd (CSeq _ c1 c2) =
 shrinkCmd (CSkip _) = [CSkip trivialPosition]
 shrinkCmd (CExt _ name params) =
   [CExt trivialPosition name params' | params' <- shrink params]
+shrinkCmd (CBlock _ c) =
+  CBlock trivialPosition <$> shrinkCmd c
 
 shrinkLit :: Lit -> [Lit]
 shrinkLit (LInt i) =
@@ -705,6 +717,8 @@ genCmdPatternSized sz
           <*> genCmdPatternSized (sz - 1))
       , (1, pure $ CPSkip trivialPosition)
       , (1, CPExt trivialPosition <$> genIdent <*> genParamPatternsSized (sz - 1))
+      , (1, CPBlock trivialPosition
+            <$> genCmdPatternSized (sz - 1))
       ]
 
 instance Arbitrary Param where

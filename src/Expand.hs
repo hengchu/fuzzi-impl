@@ -67,22 +67,23 @@ desugarFix :: Cmd -> [ExpansionRule] -> Cmd
 desugarFix c rules =
   let c' = expandAll c rules
   in if c == c'
-     then c
+     then normalizeSeq c
      else desugarFix c' rules
 
 bmapSrc :: CmdPattern
 bmapSrc = [cpat|
-bmap(v(in), v(out), v(t_in), v(idx), v(t_out), { c(body) })
+bmap(v(in), v(out), v(t_in), v(idx), v(t_out), c(body))
 |]
 
 bmapTgt :: CmdPattern
 bmapTgt = [cpat|
 v(idx) = 0;
+v(out) = {};
 length(v(out)) = length(v(in));
 while v(idx) < length(v(in)) do
   v(t_in) = (v(in))[v(idx)];
-  c(body);
-  v(out)[idx] = v(t_out);
+  { c(body) };
+  v(out)[v(idx)] = v(t_out);
   v(idx) = v(idx) + 1;
 end
 |]
@@ -92,7 +93,7 @@ bmapExpansionRule = ExpansionRule bmapSrc bmapTgt
 
 amapSrc :: CmdPattern
 amapSrc = [cpat|
-amap(v(in), v(out), v(t_in), v(idx), v(t_out), { c(body) })
+amap(v(in), v(out), v(t_in), v(idx), v(t_out), c(body))
 |]
 
 amapTgt :: CmdPattern
@@ -106,7 +107,7 @@ partitionSrc = [cpat|
 partition(v(in), v(out),
           v(t_in), v(idx), v(t_out),
           v(t_idx), v(out_idx),
-          v(t_part), e(n_parts), { c(body) })
+          v(t_part), e(n_parts), c(body))
 |]
 
 partitionTgt :: CmdPattern
@@ -119,7 +120,7 @@ while v(idx) < e(n_parts) do
   v(out)[v(idx)] = v(t_part);
   v(idx) = v(idx) + 1;
 end;
-bmap(v(in), v(out_idx), v(t_in), v(idx), v(t_out), { c(body) });
+bmap(v(in), v(out_idx), v(t_in), v(idx), v(t_out), c(body));
 while v(idx) < length(v(out_idx)) do
   v(t_idx) = (v(out_idx))[v(idx)];
   if 0 <= v(t_idx) && v(t_idx) < length(v(out_idx)) then

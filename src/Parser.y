@@ -125,6 +125,7 @@ Cmd
   | while Expr do Cmd end                     { CWhile   (token2Position $1) $2 $4 }
   | Cmd ';'                                   { $1 }
   | Cmd ';' Cmd                               { CSeq     (token2Position $2) $1 $3 }
+  | CmdBlock                                  { $1 }
   | ident '(' ExtensionParams ')'             {% getIdent $1 `bindP` \ident ->
                                                  returnP $ CExt (token2Position $1) ident $3 }
 
@@ -178,11 +179,11 @@ Expr
   | clip '(' Expr ',' Literal ')'            { EClip (token2Position $1) $3 (snd $5) }
 
 CmdBlock
-: '{' Cmd '}' { $2 }
+: '{' Cmd '}' { CBlock (token2Position $1) $2 }
 
 ExtensionParam
 : Expr     { PExpr $1 }
-| CmdBlock { PCmd $1  }
+| Cmd      { PCmd $1  }
 
 ExtensionParams
 :                { [] }
