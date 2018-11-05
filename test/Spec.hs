@@ -7,6 +7,7 @@ import Pretty
 import Match
 import Expand
 import ShapeChecker
+import SensitivityChecker
 import Test.QuickCheck
 import Test.QuickCheck.Test
 import Text.RawString.QQ
@@ -14,6 +15,8 @@ import PatternQQ
 import qualified Data.Map as M
 import Data.Either.Combinators
 
+import Control.Lens
+import Control.Lens.Tuple
 import Control.Monad
 import System.Exit
 import Debug.Trace
@@ -350,6 +353,125 @@ t_in : float
 bsum(in, out, idx, t_in, 5.0);
 |]
 
+prog10 :: Prog
+prog10 = [prog|
+x :[1.0] float;
+y :[1.0] int;
+z : float
+
+x = x + x * 1.5;
+z = 2.0 * fc(y);
+|]
+
+prog11 :: Prog
+prog11 = [prog|
+x : bool;
+y : bool;
+n :[1.0] int;
+z : [int(5)]
+
+x = x && y;
+z = [1, 2, 3, n, 5];
+|]
+
+prog12 :: Prog
+prog12 = [prog|
+x : [int];
+y : {int};
+z :[1.0] int
+
+x[0] = z;
+y[0] = z;
+|]
+
+prog13 :: Prog
+prog13 = [prog|
+x :[1.0] [int]
+
+length(x) = 10;
+|]
+
+prog14 :: Prog
+prog14 = [prog|
+x :[1.0] [int];
+y :[1.0] int
+
+length(x) = y;
+|]
+
+prog15 :: Prog
+prog15 = [prog|
+x :[1.0] {int};
+y : int
+
+length(x) = y;
+|]
+
+prog16 :: Prog
+prog16 = [prog|
+x :[1.0] float
+
+x $= lap(2.0, x);
+|]
+
+prog17 :: Prog
+prog17 = [prog|
+x :[1.0] float;
+y :[2.0] float
+
+x $= lap(2.0, x);
+y $= lap(2.0, y)
+|]
+
+prog18 :: Prog
+prog18 = [prog|
+x : int
+
+while x < 10 do
+  x = x + 1;
+end
+|]
+
+prog19 :: Prog
+prog19 = [prog|
+x :[1.0] int;
+y : int
+
+if y > 0 then
+  x = 2 * x;
+else
+  x = 3 * x;
+end
+|]
+
+prog20 :: Prog
+prog20 = [prog|
+x :[1.0] float;
+y : int
+
+if y > 0 then
+  x = 2.0 * x;
+else
+  x = 3.0 * x;
+  x $= lap(1.0, x);
+end
+|]
+
+expectMaxEps :: Float -> Prog -> Bool
+expectMaxEps eps p =
+  not . null $ filter (\es -> es ^._1 <= eps) (runSensitivityCheckerIgnoreError p 10000)
+
+expectMaxSens' :: Var -> Float -> SContext -> Bool
+expectMaxSens' x s (SContext sctx) =
+  case sctx ^. (at x) of
+    Nothing -> False
+    Just s' -> s' <= s
+
+expectMaxSens :: [(Var, Float)] -> Prog -> Bool
+expectMaxSens xs p = any id $ do
+  (_, sctx) <- runSensitivityCheckerIgnoreError p 10000
+  return $ all id $ map (\(x, s) -> expectMaxSens' x s sctx) xs
+
 assert :: String -> Bool -> IO ()
 assert label cond = do
   putStrLn label
@@ -380,6 +502,32 @@ unitTests = do
   assert "prog9 shape checks"
     $ isRight . runShapeChecker
     $ expandProg prog9
+  assert "prog10 sens checks"
+    $ expectMaxEps 0 prog10
+      && expectMaxSens [("x", 2.5), ("y", 1.0), ("z", 2.0)] prog10
+  assert "prog12 sens checks"
+    $ expectMaxEps 0 prog12
+      && expectMaxSens [("x", 1), ("y", 2)] prog12
+  assert "prog14 should not sens check"
+    $ (not $ expectMaxEps 0 prog14)
+      && (not $ expectMaxSens [] prog14)
+  assert "prog15 should sens check"
+    $ expectMaxEps 0 prog15
+  assert "prog16 should sens check"
+    $ expectMaxEps 0.5 prog16
+    && expectMaxSens [("x", 0)] prog16
+  assert "prog17 should sens check"
+    $ expectMaxEps 1.5 prog17
+    && expectMaxSens [("x", 0), ("y", 0)] prog17
+  assert "prog18 should sens check"
+    $ expectMaxEps 0 prog18
+    && expectMaxSens [("x", 0)] prog18
+  assert "prog19 should sens check"
+    $ expectMaxEps 0 prog19
+    && expectMaxSens [("x", 3)] prog19
+  assert "prog20 should sens check"
+    $ expectMaxEps 3 prog20
+    && expectMaxSens [("x", 2)] prog20
 
 main :: IO ()
 main = do

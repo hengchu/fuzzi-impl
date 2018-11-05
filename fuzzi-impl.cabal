@@ -63,6 +63,7 @@ library
                 , PatternQQ
                 , Expand
                 , ShapeChecker
+                , SensitivityChecker
       --, Interp
       --, Python
       --, Typechecker.Basic
@@ -92,6 +93,8 @@ library
                    , DeriveDataTypeable
                    , QuasiQuotes
                    , TemplateHaskell
+                   , ConstraintKinds
+                   , MultiParamTypeClasses
 executable fuzzi
   main-is: Main.hs
   hs-source-dirs:
@@ -122,6 +125,7 @@ test-suite fuzzi-impl-test
               , containers
               , QuickCheck
               , either
+              , lens
   other-modules:
       Paths_fuzzi_impl
   default-language: Haskell2010

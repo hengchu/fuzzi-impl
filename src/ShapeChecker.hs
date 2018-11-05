@@ -17,11 +17,29 @@ data ShapeError = ShapeError {
   , shape_error_message :: String
   } deriving (Show, Eq, Generic)
 
-shapeFail :: (MonadError ShapeError m) => Position -> String -> m a
-shapeFail p msg = throwError $ ShapeError p msg
+class Get c r where
+  get :: c -> r
 
-askCtxt :: MonadReader Context m => m (M.Map Var Tau)
-askCtxt = getContext <$> ask
+class Inj c r where
+  inj :: r -> c
+
+instance Get Context Context where
+  get = id
+
+instance Inj ShapeError ShapeError where
+  inj = id
+
+shapeFail :: ( Inj e ShapeError
+             , MonadError e m
+             )
+          => Position -> String -> m a
+shapeFail p msg = throwError . inj $ ShapeError p msg
+
+askCtxt :: ( Get c Context
+           , MonadReader c m
+           )
+        => m (M.Map Var Tau)
+askCtxt = getContext . get <$> ask
 
 isSubRec :: M.Map Var Tau -> M.Map Var Tau -> Bool
 isSubRec m1 m2 =
@@ -29,7 +47,7 @@ isSubRec m1 m2 =
     (\label t1 acc ->
        case m2 ^. (at label) of
          Nothing -> False
-         Just t2 -> (isCompat t2 t1) && acc
+         Just t2 -> (isCompat t1 t2) && acc
     )
     True
     m1
@@ -45,7 +63,8 @@ isCompat (TRec m1) (TRec m2) = isSubRec m2 m1
 isCompat _  TAny = True
 isCompat t1 t2   = t1 == t2
 
-litAllCompat :: (MonadError ShapeError m)
+litAllCompat :: ( Inj e ShapeError
+                , MonadError e m)
              => Position -> [Tau] -> m Tau
 litAllCompat p [] = shapeFail p $ "Expecting at least 1 type"
 litAllCompat _ (t:[]) = return t
@@ -54,8 +73,10 @@ litAllCompat p (t1:t2:more) =
   then litAllCompat p (t1:more)
   else shapeFail p $ "Not compatible shapes in literal"
 
-checkLit :: ( MonadReader Context m
-            , MonadError ShapeError m)
+checkLit :: ( Get c Context
+            , MonadReader c m
+            , Inj e ShapeError
+            , MonadError e m)
          => Position -> Lit -> m Tau
 checkLit _ (LInt _) = return TInt
 checkLit _ (LFloat _) = return TFloat
@@ -95,8 +116,10 @@ isArithOp MULT = True
 isArithOp DIV = True
 isArithOp _ = False
 
-checkExpr :: ( MonadReader Context m
-             , MonadError ShapeError m)
+checkExpr :: ( Get c Context
+             , MonadReader c m
+             , Inj e ShapeError
+             , MonadError e m)
           => Expr -> m Tau
 checkExpr (EVar p x) = do
   ctx <- askCtxt
@@ -219,8 +242,10 @@ checkExpr edot@(EDot p e1 e2) = do
      TArr TFloat (Just len2)) | len1 == len2 -> return TFloat
     _ -> shapeFail p $ "expr " ++ show (PrettyExpr edot) ++ " cannot be dot-producted"
 
-checkCmd :: ( MonadReader Context m
-            , MonadError ShapeError m)
+checkCmd :: ( Get c Context
+            , MonadReader c m
+            , Inj e ShapeError
+            , MonadError e m)
          => Cmd -> m ()
 checkCmd c@(CAssign p (EVar _ x) e) = do
   ctx <- askCtxt
@@ -235,7 +260,7 @@ checkCmd c@(CAssign p elhs@(EIndex _ (EVar _ _) _) erhs) = do
   trhs <- checkExpr erhs
   when (not $ isCompat trhs tlhs) $ do
     shapeFail p $ "incompatible assignment: " ++ show (PrettyCmd c)
-checkCmd c@(CAssign p elhs@(ELength _ (EVar _ _)) erhs) = do
+checkCmd (CAssign p elhs@(ELength _ (EVar _ _)) erhs) = do
   tlhs <- checkExpr elhs
   trhs <- checkExpr erhs
   case (tlhs, trhs) of
