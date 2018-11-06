@@ -219,10 +219,7 @@ prologue = text $ unlines [
   "    return arr[0:new_len]",
   "",
   "def init_with_json(data, name):",
-  "  try:",
-  "    return data[name]",
-  "  except KeyError:",
-  "    return None"
+  "  return data[name]"
   ]
 
 transInputs :: (Constraints c e m) => String -> [Decl] -> m Doc
@@ -235,29 +232,36 @@ transInputs path decls = do
     readJsonDoc
     ] ++ (map go decls)
   where go (Decl _ x _ t) =
-          case t of
-            TInt -> text x <+> equals
+          let d =
+                case t of
+                  TInt -> text x <+> equals
                            <+> text "init_with_json"
-                           <> (parens $ text "input_data" <> comma <+> text x)
-            TFloat -> text x <+> equals
+                           <> (parens $ text "input_data" <> comma <+> (quotes $ text x))
+                  TFloat -> text x <+> equals
                              <+> text "init_with_json"
-                             <> (parens $ text "input_data" <> comma <+> text x)
-            TBool -> text x <+> equals
+                             <> (parens $ text "input_data" <> comma <+> (quotes $ text x))
+                  TBool -> text x <+> equals
                             <+> text "init_with_json"
-                            <> (parens $ text "input_data" <> comma <+> text x)
-            TAny -> text x <+> equals
+                            <> (parens $ text "input_data" <> comma <+> (quotes $ text x))
+                  TAny -> text x <+> equals
                            <+> text "init_with_json"
-                           <> (parens $ text "input_data" <> comma <+> text x)
-            TBag _ -> text x <+> equals
+                           <> (parens $ text "input_data" <> comma <+> (quotes $ text x))
+                  TBag _ -> text x <+> equals
                              <+> text "init_with_json"
-                             <> (parens $ text "input_data" <> comma <+> text x)
-            TRec _ -> text x <+> equals
+                             <> (parens $ text "input_data" <> comma <+> (quotes $ text x))
+                  TRec _ -> text x <+> equals
                              <+> text "init_with_json"
-                             <> (parens $ text "input_data" <> comma <+> text x)
-            TArr _ _ -> text x <+> equals
+                             <> (parens $ text "input_data" <> comma <+> (quotes $ text x))
+                  TArr _ _ -> text x <+> equals
                                <+> text "np.array"
                                <> (parens $ text "init_with_json"
-                                   <> (parens $ text "input_data" <> comma <+> text x))
+                                   <> (parens $ text "input_data" <> comma <+> (quotes $ text x)))
+          in vcat [
+            text "try:",
+            nest 2 d,
+            text "except KeyError:",
+            nest 2 $ text "pass"
+            ]
 
 
 transProg :: (Constraints c e m) => String -> Prog -> m Doc

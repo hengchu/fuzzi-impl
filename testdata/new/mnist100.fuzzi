@@ -18,8 +18,14 @@ temp: float;
 prob: float;
 sc: float;
 
-size: float
+size: float;
 
+epoch: int
+
+epoch = 0;
+
+while epoch < 50 do
+{
 /* Extend each row with a constant 1 for bias */
 bmap(db, db1, trow, i, trow1, {
   clear(trow1, clear_idx);
@@ -83,4 +89,7 @@ while clear_idx < 101 do
     w[clear_idx] = j_sum / size;
   };
   clear_idx = clear_idx + 1;
+end
+};
+epoch = epoch + 1
 end

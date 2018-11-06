@@ -40,7 +40,7 @@ options =
       "Sensitivity check",
     Option "t" ["transpile"]
       (ReqArg
-        (\dt opt -> return $ opt{optDataFile = dt})
+        (\dt opt -> return $ opt{optDataFile = dt, optMode = TranspileOnly})
          "FILE")
       "JSON data file path",
     Option "f" ["file"]
