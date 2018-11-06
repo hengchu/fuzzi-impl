@@ -12,21 +12,21 @@ pip install -r requirements.txt
 ### Transpile a fuzzi program into python:
 
 ```bash
-stack exec -- fuzzi --file program.fuzzi --transpile --interp input.json > program.py
+stack exec -- fuzzi -f testdata/new/mnist100.fuzzi -t testdata/mnist.json > mnist100.py
 ```
 
-Now, you can run this program through `python program.py`, or you can import it
+Now, you can run this program through `python mnist100.py`, or you can import it
 into another python script by doing
 
 ```python
-import program
+import mnist100
 ```
 
 If the fuzzi program defines a variable called `w`, you can access the output of
 this variable in the python script with
 
 ```python
-import program
+import mnist100
 
-print(program.w)
+print(mnist100.w)
 ```
