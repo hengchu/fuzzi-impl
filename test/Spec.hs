@@ -115,6 +115,7 @@ while idx < length(in) do
   (out_idx)[idx] = t_out;
   idx = idx + 1;
 end;
+idx = 0;
 while idx < length(out_idx) do
   t_idx = (out_idx)[idx];
   if 0 <= t_idx && t_idx < length(out_idx) then

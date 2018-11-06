@@ -288,6 +288,40 @@ end
 
 |]
 
+paperExample :: Prog
+paperExample = [prog|
+/* The input database */
+income:[1.0] { float };
+/* The partitions of low, middle, high income groups */
+income_groups: [ { float }(3) ];
+
+/* Auxillary variables for partition extension */
+t_income: float;
+i: int;
+t_part_idx: int;
+part_indices: { int };
+t_part: { float };
+t_idx: int;
+
+/* Constants */
+k_LOW_INCOME_THRESHOLD : float;
+k_MID_INCOME_THRESHOLD : float
+
+k_LOW_INCOME_THRESHOLD = 1000.0;
+k_MID_INCOME_THRESHOLD = 5000.0;
+
+partition(income, income_groups, t_income, i, t_part_idx, t_idx, part_indices, t_part, 3, {
+  if t_income < k_LOW_INCOME_THRESHOLD then
+    t_part_idx = 0;
+  else
+    if t_income < k_MID_INCOME_THRESHOLD then
+      t_part_idx = 1;
+    else
+      t_part_idx = 2;
+    end
+  end
+});
+|]
 
 testprog1 :: Prog
 testprog1 = [prog|

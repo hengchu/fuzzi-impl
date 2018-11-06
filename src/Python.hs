@@ -32,7 +32,7 @@ fixity = M.fromList [(OR, 1), (AND, 1),
                     ]
 
 opDoc :: M.Map Binop Doc
-opDoc = M.fromList [(OR, text "||"), (AND, text "&&"),
+opDoc = M.fromList [(OR, text "or"), (AND, text "and"),
                     (EQ, text "=="), (NEQ, text "!="),
                     (LT, text "<"), (LE, text "<="),
                     (GT, text ">"), (GE, text ">="),
@@ -56,12 +56,34 @@ transInit TInt = return $ int 0
 transInit TFloat = return $ float 0
 transInit TBool = return $ text "False"
 transInit TAny = return $ text "None"
-transInit (TArr _ (Just len)) =
-  return $ text "np.zeros" <> (parens $ int len)
-transInit (TArr _ Nothing) =
-  return $ text "np.array" <> (parens . brackets $ empty)
+transInit tarr@(TArr t (Just len))
+  | isTauNumericArray tarr = do
+      contents <- replicateM len (transInit t)
+      let contentDoc = foldr (\c acc -> c <> comma <+> acc) empty contents
+      return $ text "np.array" <> (parens . brackets $ contentDoc)
+  | otherwise = do
+      contents <- replicateM len (transInit t)
+      return $ brackets $ foldr (\c acc -> c <> comma <+> acc) empty contents
+transInit t@(TArr _ Nothing)
+  | isTauNumericArray t = do
+      return $ text "np.array" <> (parens . brackets $ empty)
+  | otherwise =
+      return $ brackets empty
 transInit (TBag _) = return $ brackets empty
 transInit _ = shapeFail trivialPosition $ "not supported"
+
+isTauNumericArray' :: Bool -> Tau -> Bool
+isTauNumericArray' inarray TInt       = inarray
+isTauNumericArray' inarray TFloat     = inarray
+isTauNumericArray' inarray TBool      = inarray
+isTauNumericArray' inarray TAny       = inarray
+isTauNumericArray' inarray (TArr t _) = inarray && (isTauNumericArray' True t)
+isTauNumericArray' _       (TBag _)   = False
+isTauNumericArray' _       (TRec _)   = False
+
+isTauNumericArray :: Tau -> Bool
+isTauNumericArray (TArr t _) = isTauNumericArray' True t
+isTauNumericArray _ = False
 
 transDecl :: (Constraints c e m) => Decl -> m Doc
 transDecl (Decl _ x _ t) = do
@@ -130,6 +152,11 @@ transExpr (ELog _ e) _ = do
   d <- transExpr e 0
   return $ text "np.log" <> parens d
 
+getArrayOrBagContentTau :: (Constraints c e m) => Tau -> m Tau
+getArrayOrBagContentTau (TArr t _) = return t
+getArrayOrBagContentTau (TBag t) = return t
+getArrayOrBagContentTau _ = shapeFail trivialPosition "not an array or bag type!"
+
 transCmd :: (Constraints c e m) => Cmd -> m Doc
 transCmd (CAssign p (EVar _ x) e) = do
   ctx <- askCtxt
@@ -157,16 +184,23 @@ transCmd (CAssign _ (EIndex _ (EVar _ x) eidx) e) = do
 transCmd (CAssign p (ELength _ (EVar _ x)) e) = do
   ctx <- askCtxt
   let tx = ctx ^. (at x)
-  case tx of
-    Just (TArr _ _) -> do
+  case isTauNumericArray <$> tx of
+    Just True -> do
       docE <- transExpr e 0
       let xShape = text x <> dot <> text "shape"
           newLength = lparen <> docE <> comma <> rparen
           newShape = newLength <> text "+" <> xShape <> (brackets $ int 1 <> text ":")
       return $ text x <> dot <> text "resize" <> (parens $ newShape)
-    Just (TBag _) -> do
+    Just False -> do
       docE <- transExpr e 0
-      return $ text x <+> equals <+> text "resize_bag" <> (parens $ text x <> comma <+> docE)
+      case tx of
+        Just tArrOrBag -> do
+          contentTau <- getArrayOrBagContentTau tArrOrBag
+          defaultValDoc <- transInit contentTau
+          return $ text x <+> equals
+                          <+> text "resize_bag"
+                          <> (parens $ text x <> comma <+> docE <> comma <+> defaultValDoc)
+        _ -> shapeFail p "bug in shape checker?"
     _ -> shapeFail p "bug in shape checker?"
 transCmd (CAssign p _ _) =
   shapeFail p "unsupported assignment form, bug in shape checker?"
@@ -212,9 +246,9 @@ imports = vcat [
 
 prologue :: Doc
 prologue = text $ unlines [
-  "def resize_bag(arr, new_len):",
+  "def resize_bag(arr, new_len, v):",
   "  if new_len > len(arr):",
-  "    return arr + [None] * (new_len - len(arr))",
+  "    return arr + [v] * (new_len - len(arr))",
   "  else:",
   "    return arr[0:new_len]",
   "",
@@ -233,29 +267,17 @@ transInputs path decls = do
     ] ++ (map go decls)
   where go (Decl _ x _ t) =
           let d =
-                case t of
-                  TInt -> text x <+> equals
-                           <+> text "init_with_json"
-                           <> (parens $ text "input_data" <> comma <+> (quotes $ text x))
-                  TFloat -> text x <+> equals
-                             <+> text "init_with_json"
-                             <> (parens $ text "input_data" <> comma <+> (quotes $ text x))
-                  TBool -> text x <+> equals
-                            <+> text "init_with_json"
-                            <> (parens $ text "input_data" <> comma <+> (quotes $ text x))
-                  TAny -> text x <+> equals
-                           <+> text "init_with_json"
-                           <> (parens $ text "input_data" <> comma <+> (quotes $ text x))
-                  TBag _ -> text x <+> equals
-                             <+> text "init_with_json"
-                             <> (parens $ text "input_data" <> comma <+> (quotes $ text x))
-                  TRec _ -> text x <+> equals
-                             <+> text "init_with_json"
-                             <> (parens $ text "input_data" <> comma <+> (quotes $ text x))
-                  TArr _ _ -> text x <+> equals
-                               <+> text "np.array"
+                case isTauNumericArray t of
+                  True ->
+                    text x <+> equals
+                           <+> text "np.array"
                                <> (parens $ text "init_with_json"
-                                   <> (parens $ text "input_data" <> comma <+> (quotes $ text x)))
+                                   <> (parens $ text "input_data"
+                                                <> comma
+                                                <+> (quotes $ text x)))
+                  False -> text x <+> equals
+                           <+> text "init_with_json"
+                           <> (parens $ text "input_data" <> comma <+> (quotes $ text x))
           in vcat [
             text "try:",
             nest 2 d,

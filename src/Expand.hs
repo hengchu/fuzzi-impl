@@ -142,6 +142,7 @@ end;
     v(idx) = v(idx) + 1;
   end;
 
+v(idx) = 0;
 while v(idx) < length(v(out_idx)) do
   v(t_idx) = (v(out_idx))[v(idx)];
   if 0 <= v(t_idx) && v(t_idx) < length(v(out_idx)) then
