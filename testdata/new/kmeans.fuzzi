@@ -1,0 +1,91 @@
+/* input data */
+db:[1.0] { [float(5)] };
+/* current centroids */
+cs: [ [float(5)] ];
+/* partitioned input data */
+parts: [ { [float(5)] } ];
+
+/* Auxilary variables for the partition extension */
+t_in: [float(5)];
+i: int;
+t_out: int;
+t_idx: int;
+out_idx: {int};
+t_part: {[float(5)]};
+
+/* Temporary variables used in the partition computations */
+min_dist: float;
+this_dist: float;
+clear_idx: int;
+
+k_INFINITY: float;
+
+/* Temporary variables used for computing the centroids */
+k : int;
+cs_j: [float(5)];
+this_partition: { [float(5)] };
+this_partition_k: { float };
+t_coord_k: float;
+t_coord_k_sum: float;
+part_size: float
+
+k_INFINITY = 100000000.0;
+
+/* Partition the input database into 3 partitions, same as the number of centroids */
+partition(db, parts, t_in, i, t_out, t_idx, out_idx, t_part, 3, {
+  min_dist = k_INFINITY;
+  this_dist = 0.0;
+  t_out = 0;
+
+  clear_idx = 0;
+  while clear_idx < 3 do
+    {
+      this_dist = (cs[clear_idx][0] - t_in[0]) * (cs[clear_idx][0] - t_in[0])
+                + (cs[clear_idx][1] - t_in[1]) * (cs[clear_idx][1] - t_in[1])
+                + (cs[clear_idx][2] - t_in[2]) * (cs[clear_idx][2] - t_in[2])
+                + (cs[clear_idx][3] - t_in[3]) * (cs[clear_idx][3] - t_in[3]);
+
+      if this_dist < min_dist then
+        min_dist = this_dist;
+        t_out = clear_idx;
+      else
+        skip;
+      end
+    };
+    clear_idx = clear_idx + 1;
+  end;
+
+  min_dist = 0.0;
+  this_dist = 0.0;
+});
+
+
+clear_idx = 0;
+while clear_idx < 3 do
+  {
+    this_partition = parts[clear_idx];
+    k = 0;
+    while k < 5 do
+      {
+        i = 0;
+        bmap(this_partition, this_partition_k, t_in, i, t_coord_k, {t_coord_k = t_in[clear_idx]});
+        t_coord_k_sum = 0.0;
+        t_coord_k = 0.0;
+        i = 0;
+        /* Add up all entries in kth coordinate */
+        bsum(this_partition_k, t_coord_k_sum, i, t_coord_k, 8.0);
+
+        /* normalize */
+        part_size $= lap(1.0, fc(length(this_partition_k)));
+        t_coord_k_sum $= lap(1.0, t_coord_k_sum);
+        t_coord_k_sum = t_coord_k_sum / part_size;
+
+        cs_j = cs[clear_idx];
+        cs_j[k] = t_coord_k_sum;
+        cs[clear_idx] = cs_j;
+      };
+      k = k + 1;
+    end
+  };
+  clear_idx = clear_idx + 1;
+end

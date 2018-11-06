@@ -64,10 +64,7 @@ library
                 , Expand
                 , ShapeChecker
                 , SensitivityChecker
-      --, Interp
-      --, Python
-      --, Typechecker.Basic
-      --, Typechecker.Sensitivity
+                , Python
   build-tools:
       alex, happy
   other-modules:

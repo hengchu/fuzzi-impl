@@ -1,96 +1,125 @@
 module Main where
-{-
-import Control.Monad
-import Data.Map as M
-import GHC.IO.Handle
-import GHC.IO.Handle.FD
-import Lexer
-import Options
-import Parser
-import Pretty
+
+import Data.List
+
 import Syntax
-import Interp
+import ShapeChecker
+import SensitivityChecker
 import Python
+import Expand
+import qualified Parser as P
+import System.IO
 import System.Exit
+import System.Environment
+import Control.Monad
+import System.Console.GetOpt
 import Text.PrettyPrint
-import qualified Typechecker.Basic as TB
-import Typechecker.Sensitivity
-import Data.Aeson (eitherDecodeStrict, encode)
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy as BSL
 
-data CLIOptions = CLIOptions {
-  optFile :: String
-  , optTypecheck :: Bool
-  , optPretty :: Bool
-  , optInterp :: String
-  , optTranspile :: Bool
-  }
+data ExecMode = ShapeCheckOnly
+              | SensitivityCheck
+              | TranspileOnly
+              deriving (Show, Eq, Ord)
 
-instance Options CLIOptions where
-  defineOptions = CLIOptions
-    <$> simpleOption "file" "stdin"
-                     "The input file"
-    <*> simpleOption "tc" False
-                     "Run sensitivity checker only?"
-    <*> simpleOption "pretty" False
-                     "Pretty print instead?"
-    <*> simpleOption "interp" ""
-                     "Run the interpreter instead?"
-    <*> simpleOption "transpile" False
-                     "Transpile to python"
+data Options = Options {
+  optMode :: ExecMode
+  , optInputFile :: String -- use "stdin" for stdin
+  , optOutputFile :: String -- use "-" for stdout
+  , optDataFile :: String
+  } deriving (Show, Eq, Ord)
 
-parseJsonMemory :: String -> IO JsonMemory
-parseJsonMemory path = do
-  fileContent <- BS.readFile path
-  case eitherDecodeStrict fileContent of
-    Left err  -> putStrLn err >> exitWith (ExitFailure (-2))
-    Right mem -> return mem
+options :: [OptDescr (Options -> IO Options)]
+options =
+  [
+    Option "S" ["shape"]
+      (NoArg
+         (\opt -> return $ opt{optMode = ShapeCheckOnly}))
+      "Shape check only",
+    Option "s" ["sensitivity"]
+      (NoArg
+         (\opt -> return $ opt{optMode = SensitivityCheck}))
+      "Sensitivity check",
+    Option "t" ["transpile"]
+      (ReqArg
+        (\dt opt -> return $ opt{optDataFile = dt})
+         "FILE")
+      "JSON data file path",
+    Option "f" ["file"]
+      (ReqArg
+        (\arg opt -> return $ opt{optInputFile = arg})
+        "FILE")
+      "Input file path",
+    Option "o" ["file"]
+      (ReqArg
+        (\arg opt -> return $ opt{optOutputFile = arg})
+        "FILE")
+      "Output file path",
+    Option "h" ["help"]
+      (NoArg
+        (\_ -> do
+            prg <- getProgName
+            hPutStrLn stderr (usageInfo prg options)
+            exitWith ExitSuccess))
+      "Show help"
+  ]
 
-main :: IO ()
-main = runCommand $ \opts _ -> do
-  let file = optFile opts
-  progText <- if file == "stdin"
-                then hGetContents stdin
-                else readFile file
-  let ast = parseProg . alexScanTokens $ progText
-  let tcResult = TB.runTcM $ TB.tcCmd ast
-
-  case tcResult of
-    Left errors -> forM_ errors putStrLn >> exitWith (ExitFailure (-1))
-    Right basicTypeContext -> do
-      when (optTranspile opts) $ do
-        when ((length $ optInterp opts) == 0) $ do
-          putStrLn "Please specify --interp"
-          exitWith (ExitFailure (-2))
-
-        mem <- parseJsonMemory (optInterp opts)
-        putStr $ transpile
-                   basicTypeContext
-                   (M.keys $ getJsonMemory mem)
-                   (optInterp opts)
-                   ast
-        exitWith ExitSuccess
-
-      when (optPretty opts) $ do
-        putStr . render . prettyCmd . desugarAll $ ast
-        exitWith ExitSuccess
-
-      when (optTypecheck opts && length (optInterp opts) == 0) $ do
-        let result = checkCmd ast
-        case result of
-          Left  errs      -> forM_ errs putStrLn
-          Right (ctx, ep) -> do
-            putStrLn $ "Epsilon = " ++ show ep
-            forM_ (M.toList ctx) $ \(x, s) -> do
-              putStrLn $ x ++ " : " ++ show s
-        exitWith ExitSuccess
-
-      when ((length $ optInterp opts) > 0) $ do
-        mem <- parseJsonMemory (optInterp opts)
-        let mem' = interp (desugarAll ast) (getJsonMemory mem)
-        BSL.putStrLn . encode . JsonMemory $ mem'
--}
+startOptions :: Options
+startOptions = Options SensitivityCheck "stdin" "-" ""
 
 main :: IO ()
-main = return ()
+main = do
+  args <- getArgs
+
+  let (actions, nonOptions, errors) = getOpt RequireOrder options args
+
+  opts <- foldl (>>=) (return startOptions) actions
+
+  when (not . null $ nonOptions) $ do
+    hPutStrLn stderr $ "unknown options: " ++ (intercalate ", " nonOptions)
+    exitFailure
+
+  when (not . null $ errors) $ do
+    hPutStrLn stderr $ "error in parsing commands: " ++ (intercalate ", " errors)
+    exitFailure
+
+  let inputFile = optInputFile opts
+  let outputFile = optOutputFile opts
+  let jsonPath = optDataFile opts
+
+  inputFd <- if inputFile == "stdin" then return stdin else openFile inputFile ReadMode
+
+  inputContent <- hGetContents inputFd
+
+  ast <-
+    case P.parse P.parseProg inputContent of
+      Left err -> do
+        hPutStrLn stderr err
+        exitFailure
+      Right ast -> return ast
+
+  let ast' = ast{getCmd = desugarFix (getCmd ast) fuzziExpansionRules}
+
+  case optMode opts of
+    ShapeCheckOnly -> do
+      case runShapeChecker ast' of
+        Left err -> do
+          hPutStrLn stderr $ show err
+          exitFailure
+        Right _ -> do
+          hPutStrLn stdout $ "program passed shape checker"
+          exitSuccess
+    SensitivityCheck -> do
+      case runSensitivityChecker ast' 100000 of
+        Left err -> do
+          hPutStrLn stderr $ show err
+          exitFailure
+        Right ctx ->
+          hPutStrLn stdout $ show ctx
+    TranspileOnly -> do
+      case runTranspiler jsonPath ast' of
+        Left err -> do
+          hPutStrLn stderr $ show err
+          exitFailure
+        Right pythonCode -> do
+          outputFd <- if outputFile == "-" then return stdout else openFile outputFile WriteMode
+          hPutStrLn outputFd $ render pythonCode
+          exitSuccess

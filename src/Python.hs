@@ -1,10 +1,17 @@
+{-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 {-# LANGUAGE ViewPatterns #-}
 
 module Python where
 
-import Prelude hiding (LT, EQ, GT)
+import Control.Lens ((^.), at)
+import Control.Monad.Reader
+import Control.Monad.Except
+
+import Expand
+import Pretty
+import Prelude hiding (LT, EQ, GT, (<>))
 import Syntax
-import Typechecker.Basic
+import ShapeChecker
 import Text.PrettyPrint
 import qualified Data.Map as M
 
@@ -33,158 +40,168 @@ opDoc = M.fromList [(OR, text "||"), (AND, text "&&"),
                     (MULT, text "*"), (DIV, text "/")
                    ]
 
-transSLit :: SmallLit -> Doc
-transSLit (SILit d) = int d
-transSLit (SFLit f) = float f
-transSLit (SBLit b) = if b then text "True" else text "False"
-
-transRowLit :: M.Map String SmallLit -> Doc
-transRowLit rlit =
-  M.foldrWithKey
-    (\key val doc -> (quotes $ text key) <> transSLit val <> comma <+> doc)
-    empty
-    rlit
-
-transLit :: Literal -> Doc
-transLit (SLit slit) = transSLit slit
-transLit (RLit (getRowLits -> rlit)) = transRowLit rlit
-
-transExpr :: Expr -> Int -> Doc
-transExpr (EVar _ x)    _    = text x
-transExpr (ELength _ e) _    = text "len" <> lparen <> transExpr e 0 <> rparen
-transExpr (ELit _ lit)  _    = transLit lit
-transExpr (EBinop _ el op er) prec =
-  let f = fixity M.! op
-      p = precedence M.! op
-  in parensIf (prec > p)
-       $ (transExpr el p) <+> (opDoc M.! op) <+> (transExpr er (p + f))
-transExpr (EIndex _ earr eidx) _ =
-  transExpr earr 0 <> lbrack <> transExpr eidx 0 <> rbrack
-transExpr (ERUpdate _ erec key eval) _ =
-  text "rec_update" <> lparen <>  transExpr erec 0 <> comma
-                              <+> text key <> comma
-                              <+> transExpr eval 0
-                              <> rparen
-transExpr (ERAccess _ erec key) _ =
-  transExpr erec 0 <> lbrack <> quotes (text key) <> rbrack
-transExpr (EArray _ exprs) _ =
-  text "np.array"
-  <> lparen
-  <> lbrack <> foldr (\e doc -> transExpr e 0 <> comma <+> doc) empty exprs <> rbrack
-  <> rparen
-transExpr (EBag _ exprs) _ =
-  lbrack <> foldr (\e doc -> transExpr e 0 <> comma <+> doc) empty exprs <> rbrack
-transExpr (EFloat _ e) _ =
-  text "float" <> lparen <> transExpr e 0 <> rparen
-transExpr (EClip _ e bounds) _ =
-  text "np.clip" <> lparen <>  transExpr e 0 <> comma
-                           <+> text "-" <> transLit bounds <> comma
-                           <+> transLit bounds <> rparen
-transExpr (EScale p el er) prec =
-  transExpr (EBinop p el MULT er) prec
-transExpr (EDot _ el er) _ =
-  text "np.dot" <> lparen <>  transExpr el 0 <> comma
-                          <+> transExpr er 0 <> rparen
-transExpr (EExp _ e) _ =
-  text "np.exp" <> lparen <> transExpr e 0 <> rparen
-transExpr (ELog _ e) _ =
-  text "np.log" <> lparen <> transExpr e 0 <> rparen
-
-parensIf :: Bool -> Doc -> Doc
-parensIf cond doc = if cond then lparen <> doc <> rparen else doc
+type Constraints c e m = ( Get c Context
+                         , Inj e ShapeError
+                         , MonadReader c m
+                         , MonadError e m )
 
 dot :: Doc
 dot = text "."
 
-initFromSmallType :: SmallType -> Doc
-initFromSmallType STInt   = int 0
-initFromSmallType STFloat = float 0
-initFromSmallType STBool  = text "False"
-initFromSmallType STAny   = text "None"
+parensIf :: Bool -> Doc -> Doc
+parensIf cond doc = if cond then lparen <> doc <> rparen else doc
 
-initFromLargeType :: LargeType -> Doc
-initFromLargeType (LTSmall st) = initFromSmallType st
-initFromLargeType (LTRow (getRowTypes -> rtyps)) =
-  lbrace <>
-  M.foldrWithKey
-    (\key st initE ->
-       text key <> colon <+> initFromSmallType st <>
-       comma <+> initE) empty rtyps
-  <> rbrace
-initFromLargeType (LTArray _ Nothing) =
-  text "np.array" <> lparen <> lbrack <> rbrack <> rparen
-initFromLargeType (LTArray _ (Just len)) =
-  text "np.zeros" <> lparen <> int len <> rparen
-initFromLargeType (LTBag _) = lbrack <> rbrack
-initFromLargeType LTAny = text "None"
+transInit :: (Constraints c e m) => Tau -> m Doc
+transInit TInt = return $ int 0
+transInit TFloat = return $ float 0
+transInit TBool = return $ text "False"
+transInit TAny = return $ text "None"
+transInit (TArr _ (Just len)) =
+  return $ text "np.zeros" <> (parens $ int len)
+transInit (TArr _ Nothing) =
+  return $ text "np.array" <> (parens . brackets $ empty)
+transInit (TBag _) = return $ brackets empty
+transInit _ = shapeFail trivialPosition $ "not supported"
 
-transCmd :: Context -> Cmd -> Doc
--- TODO: this needs to be fixed for the general case
-transCmd ctx (CAssign _ (ELength _ elhs) erhs) =
-  let Right typLhs = runTcM $ tcExpr ctx elhs
-  in case typLhs of
-       LTArray _ _ ->
-         let x         = indexedVar elhs
-             xShape    = text x <> dot <> text "shape"
-             newLength = lparen <> transExpr erhs 0 <> comma <> rparen
-             newShape  = newLength <> text "+" <> xShape <> lbrack <> int 1 <> text ":" <> rbrack
-         in text x <> dot <> text "resize" <> lparen <> newShape <> rparen
-       LTBag _ ->
-         let lhsExpr = transExpr elhs 0
-             rhsExpr = transExpr erhs 0
-         in lhsExpr <+> equals <+> text "resize_bag" <> lparen <> lhsExpr <> comma <+> rhsExpr <> rparen
-       _ -> error "Impossible: the typechecker should have caught length upadtes on non bag/array type"
-transCmd ctx (CAssign _ elhs erhs) =
-  let Right typLhs = runTcM $ tcExpr ctx elhs
-  in case typLhs of
-       LTArray _ _ -> transExpr elhs 0 <+> equals <+> text "np.array" <> lparen <> transExpr erhs 0 <> rparen
-       LTBag _ -> transExpr elhs 0 <+> equals <+> text "copy.deepcopy" <> lparen <> transExpr erhs 0 <> rparen
-       _ -> transExpr elhs 0 <+> equals <+> transExpr erhs 0
-transCmd ctx (CLaplace _ x scale mean) =
-  text x <+> equals
-         <+> text "np.random.laplace" <> lparen <>  transExpr mean 0 <> comma
-                                                <+> float scale      <> rparen
-transCmd ctx (CIf _ e ct cf) = vcat [
-    text "if" <+> transExpr e 0 <+> colon,
-    nest 2 $ transCmd ctx ct,
-    text "else" <+> colon,
-    nest 2 $ transCmd ctx cf
-  ]
-transCmd ctx (CWhile _ e c) = vcat [
-    text "while" <+> transExpr e 0 <+> colon,
-    nest 2 $ transCmd ctx c
-  ]
-transCmd ctx (CSeq _ c1 c2) = vcat [
-    transCmd ctx c1,
-    transCmd ctx c2
-  ]
-transCmd ctx (CSkip _) = text "pass"
-transCmd ctx (CDecl _ _ _ _) = empty
-transCmd ctx (CRepeat _ iters c) = vcat [
-  text "for"
-  <+> text "_"
-  <+> text "in"
-  <+> text "range" <> lparen <> int iters <> rparen <> colon,
-  nest 2 $ transCmd ctx c]
-transCmd ctx c = transCmd ctx $ desugar c
+transDecl :: (Constraints c e m) => Decl -> m Doc
+transDecl (Decl _ x _ t) = do
+  initDoc <- transInit t
+  return $ text x <+> equals <+> initDoc
 
-transInits :: Context -> Doc
-transInits (M.toList -> ctx) =
-  vcat $ map (\(x, typ) -> text x <+> equals <+> initFromLargeType typ) ctx
+transDecls :: (Constraints c e m) => [Decl] -> m Doc
+transDecls decls =
+  vcat <$> mapM transDecl decls
 
-transInputs :: Context -> [String] -> String -> Doc
-transInputs ctx vars path = vcat $ [readJsonCmd] ++ map initVar vars
-  where readJsonCmd =
-          text "input_data = json.load"
-          <> (parens $ text "open" <> (parens $ quotes $ text path))
-        initVar x =
-          let indexExpr = text "input_data" <> lbrack <> quotes (text x) <> rbrack in
-          case ctx M.! x of
-            LTSmall _ -> text x <+> equals <+> indexExpr
-            LTRow   _ -> text x <+> equals <+> indexExpr
-            LTArray _ _ -> text x <+> equals <+> text "np.array" <> (parens indexExpr)
-            LTBag _ -> text x <+> equals <+> indexExpr
-            LTAny -> text x <+> equals <+> text "None"
+transLit :: (Constraints c e m) => Lit -> m Doc
+transLit (LInt i) = return $ int i
+transLit (LFloat f) = return $ float f
+transLit (LBool b) = return $
+  if b then text "True" else text "False"
+transLit (LArr es) = do
+  ds <- mapM (flip transExpr 0) es
+  let combinedDoc = foldr (\d acc -> d <> comma <+> acc) empty ds
+  return $ text "np.array"
+           <> (parens . brackets $ combinedDoc)
+transLit (LBag es) = do
+  ds <- mapM (flip transExpr 0) es
+  let combinedDoc = foldr (\d acc -> d <> comma <+> acc) empty ds
+  return . brackets $ combinedDoc
+
+transExpr :: (Constraints c e m) => Expr -> Int -> m Doc
+transExpr (EVar _ x) _ = return $ text x
+transExpr (ELength _ e) _ = do
+  docE <- transExpr e 0
+  return $ text "len" <> parens docE
+transExpr (ELit _ lit) _ = transLit lit
+transExpr (EBinop pos el op er) prec = do
+  let f = fixity ^. (at op)
+  let p = precedence ^. (at op)
+  let od = opDoc ^. (at op)
+  case (f, p, od) of
+    (Just f, Just p, Just od) -> do
+      docL <- transExpr el p
+      docR <- transExpr er (p + f)
+      return $ parensIf (prec > p) $ docL <+> od <+> docR
+    _ -> shapeFail pos $ "Unknown fixity or precendence for operator: " ++ show op
+transExpr (EIndex _ earr eidx) _ = do
+  darr <- transExpr earr 0
+  didx <- transExpr eidx 0
+  return $ darr <> (brackets $ didx)
+transExpr (ERAccess _ erec label) _ = do
+  drec <- transExpr erec 0
+  return $ drec <> (brackets . quotes $ text label)
+transExpr (EFloat _ e) _ = do
+  docE <- transExpr e 0
+  return $ text "float" <> parens docE
+transExpr (EClip _ e lit) _ = do
+  docE <- transExpr e 0
+  docL <- transLit lit
+  return $ text "np.clip" <> (parens $ docE <> comma <+> text "-" <> docL <> comma <+> docL)
+transExpr (EScale p el er) prec =
+  transExpr (EBinop p el MULT er) prec
+transExpr (EDot _ el er) _ = do
+  dl <- transExpr el 0
+  dr <- transExpr er 0
+  return $ text "np.dot" <> (parens $ dl <> comma <+> dr)
+transExpr (EExp _ e) _ = do
+  d <- transExpr e 0
+  return $ text "np.exp" <> parens d
+transExpr (ELog _ e) _ = do
+  d <- transExpr e 0
+  return $ text "np.log" <> parens d
+
+transCmd :: (Constraints c e m) => Cmd -> m Doc
+transCmd (CAssign p (EVar _ x) e) = do
+  ctx <- askCtxt
+  let tx = ctx ^. (at x)
+  case tx of
+    Just (TArr _ _) -> do
+      docE <- transExpr e 0
+      return $ text x <+> equals <+> text "np.array" <> (parens docE)
+    Just _ -> do
+      docE <- transExpr e 0
+      return $ text x <+> equals <+> text "copy.deepcopy" <> (parens docE)
+    Nothing ->
+      shapeFail p "bug in shape checker?"
+transCmd (CAssign _ (EIndex _ (EVar _ x) eidx) e) = do
+  te <- checkExpr e
+  case te of
+    TArr _ _ -> do
+      docIdx <- transExpr eidx 0
+      docE <- transExpr e 0
+      return $ text x <> (brackets docIdx) <+> equals <+> text "np.array" <> (parens docE)
+    _ -> do
+      docIdx <- transExpr eidx 0
+      docE <- transExpr e 0
+      return $ text x <> (brackets docIdx) <+> equals <+> text "copy.deepcopy" <> (parens docE)
+transCmd (CAssign p (ELength _ (EVar _ x)) e) = do
+  ctx <- askCtxt
+  let tx = ctx ^. (at x)
+  case tx of
+    Just (TArr _ _) -> do
+      docE <- transExpr e 0
+      let xShape = text x <> dot <> text "shape"
+          newLength = lparen <> docE <> comma <> rparen
+          newShape = newLength <> text "+" <> xShape <> (brackets $ int 1 <> text ":")
+      return $ text x <> dot <> text "resize" <> (parens $ newShape)
+    Just (TBag _) -> do
+      docE <- transExpr e 0
+      return $ text x <+> equals <+> text "resize_bag" <> (parens $ text x <> comma <+> docE)
+    _ -> shapeFail p "bug in shape checker?"
+transCmd (CAssign p _ _) =
+  shapeFail p "unsupported assignment form, bug in shape checker?"
+transCmd (CLaplace _ x scale mean) = do
+  docMean <- transExpr mean 0
+  return $ text x <+> equals
+                  <+> text "np.random.laplace"
+                  <> (parens $ docMean <> comma <+> float scale)
+transCmd (CIf _ e c1 c2) = do
+  docE <- transExpr e 0
+  doc1 <- transCmd c1
+  doc2 <- transCmd c2
+  return $ vcat [
+    text "if" <+> docE <> colon,
+    nest 2 doc1,
+    text "else" <> colon,
+    nest 2 doc2
+    ]
+transCmd (CWhile _ e c) = do
+  docE <- transExpr e 0
+  docC <- transCmd c
+  return $ vcat [
+    text "while" <+> docE <> colon,
+    nest 2 docC
+    ]
+transCmd (CSeq _ c1 c2) = do
+  doc1 <- transCmd c1
+  doc2 <- transCmd c2
+  return $ vcat [
+    doc1,
+    doc2
+    ]
+transCmd (CSkip _) = return $ text "pass"
+transCmd (CBlock _ c) = transCmd c
+transCmd c = shapeFail (cmdPosn c) $ "unsupported constructs: " ++ show (PrettyCmd c)
 
 imports :: Doc
 imports = vcat [
@@ -195,28 +212,80 @@ imports = vcat [
 
 prologue :: Doc
 prologue = text $ unlines [
-  "def rec_update(rec, k, v):",
-  "  rec_copy = rec.copy()",
-  "  rec_copy[k] = v",
-  "  return rec_copy",
-  "",
   "def resize_bag(arr, new_len):",
   "  if new_len > len(arr):",
   "    return arr + [None] * (new_len - len(arr))",
   "  else:",
-  "    return arr[0:new_len]"
+  "    return arr[0:new_len]",
+  "",
+  "def init_with_json(data, name):",
+  "  try:",
+  "    return data[name]",
+  "  except KeyError:",
+  "    return None"
   ]
 
-transpile :: Context -> [String] -> String -> Cmd -> String
-transpile ctx inputVariables jsonPath c = render $ vcat [
+transInputs :: (Constraints c e m) => String -> [Decl] -> m Doc
+transInputs path decls = do
+  let readJsonDoc = text "input_data"
+                    <+> equals
+                    <+> text "json.load"
+                    <> (parens $ text "open" <> (parens . quotes $ text path))
+  return . vcat $ [
+    readJsonDoc
+    ] ++ (map go decls)
+  where go (Decl _ x _ t) =
+          case t of
+            TInt -> text x <+> equals
+                           <+> text "init_with_json"
+                           <> (parens $ text "input_data" <> comma <+> text x)
+            TFloat -> text x <+> equals
+                             <+> text "init_with_json"
+                             <> (parens $ text "input_data" <> comma <+> text x)
+            TBool -> text x <+> equals
+                            <+> text "init_with_json"
+                            <> (parens $ text "input_data" <> comma <+> text x)
+            TAny -> text x <+> equals
+                           <+> text "init_with_json"
+                           <> (parens $ text "input_data" <> comma <+> text x)
+            TBag _ -> text x <+> equals
+                             <+> text "init_with_json"
+                             <> (parens $ text "input_data" <> comma <+> text x)
+            TRec _ -> text x <+> equals
+                             <+> text "init_with_json"
+                             <> (parens $ text "input_data" <> comma <+> text x)
+            TArr _ _ -> text x <+> equals
+                               <+> text "np.array"
+                               <> (parens $ text "init_with_json"
+                                   <> (parens $ text "input_data" <> comma <+> text x))
+
+
+transProg :: (Constraints c e m) => String -> Prog -> m Doc
+transProg jsonPath (Prog decls cmd) = do
+  docDecls <- transDecls decls
+  docInputs <- transInputs jsonPath decls
+  docC <- transCmd (desugarFix cmd fuzziExpansionRules)
+  let documentation = vcat [
+        text "\"\"\"",
+        text "Fuzzi source code: ",
+        prettyCmd cmd,
+        text "\"\"\""
+        ]
+  return $ vcat [
+    documentation,
+    text "\n",
     imports,
     text "\n",
     prologue,
     text "\n",
-    transInits ctx,
+    docDecls,
     text "\n",
-    transInputs ctx inputVariables jsonPath,
+    docInputs,
     text "\n",
-    transCmd ctx c,
+    docC,
     text "\n"
-  ]
+    ]
+
+runTranspiler :: String -> Prog -> Either ShapeError Doc
+runTranspiler jsonPath p =
+  runExcept (runReaderT (transProg jsonPath p) (declsToContext . getDecls $ p))

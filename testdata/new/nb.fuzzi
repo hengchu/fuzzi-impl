@@ -1,0 +1,94 @@
+db:[1.0] { [float(58)] };
+all_labels: { float };
+label_sum: float;
+db_size: float;
+
+positive_features: { float };
+negative_features: { float };
+
+positive_feature_sum_j: float;
+negative_feature_sum_j: float;
+
+positive_fraction: float;
+negative_fraction: float;
+
+theta_positive: [float(57)];
+theta_negative: [float(57)];
+
+w: [float(57)];
+
+b_collection: [float(57)];
+b: float;
+
+/* Auxilary variables for extensions */
+t_in: [float(58)];
+i: int;
+t_out_label: float;
+t_label_sum: float;
+j: int;
+t_feature: float;
+t_sum: float
+
+db_size $= lap(1.0, fc(length(db)));
+bmap(db, all_labels, t_in, i, t_out_label, {
+  if t_in[57] == 1.0 then
+    t_out_label = 1.0;
+  else
+    t_out_label = 0.0;
+  end
+});
+
+i = 0;
+label_sum = 0.0;
+t_label_sum = 0.0;
+bsum(all_labels, label_sum, i, t_label_sum, 1.0);
+label_sum $= lap(1.0, label_sum);
+
+positive_fraction = label_sum / db_size;
+negative_fraction = 1.0 - positive_fraction;
+
+j = 0;
+while j < 57 do
+  {
+    bmap(db, positive_features, t_in, i, t_feature, {
+      if t_in[57] == 0.0 then
+        t_feature = t_in[j];
+      else
+        t_feature = 0.0;
+      end
+    });
+
+    bmap(db, negative_features, t_in, i, t_feature, {
+      if t_in[57] == 1.0 then
+        t_feature = t_in[j];
+      else
+        t_feature = 0.0;
+      end
+    });
+
+    positive_feature_sum_j = 0.0;
+    negative_feature_sum_j = 0.0;
+    t_sum = 0.0;
+    bsum(positive_features, positive_feature_sum_j, i, t_sum, 1.0);
+    bsum(negative_features, positive_feature_sum_j, i, t_sum, 1.0);
+
+    positive_feature_sum_j $= lap(1.0, positive_feature_sum_j);
+    negative_feature_sum_j $= lap(1.0, negative_feature_sum_j);
+
+    theta_positive[j] = positive_feature_sum_j / label_sum;
+    theta_negative[j] = negative_feature_sum_j / label_sum;
+
+    w[j] = log(theta_positive[j] / theta_negative[j])
+         - log((1.0 - theta_positive[j]) / (1.0 - theta_negative[j]));
+
+    b_collection[j] = log((1.0 - theta_positive[j]) / (1.0 - theta_negative[j]))
+                    - log(negative_fraction / positive_fraction);
+  };
+  j = j + 1;
+end;
+
+b = 0.0;
+i = 0;
+while i < length(b_collection) do
+  b = b + b_collection[i];
+end
