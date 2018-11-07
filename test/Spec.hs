@@ -740,6 +740,9 @@ unitTests = do
   assert "naive bayes should sens check"
     $ expectMaxEps 59 (expandProg naiveBayes)
     && expectMaxSens [("b", 0)] (expandProg naiveBayes)
+  assert "pate should sens check"
+    $ expectMaxEps 0 (expandProg pate)
+    && expectMaxSens [("ws_partitions", 1.0)] (expandProg pate)
 
 main :: IO ()
 main = do

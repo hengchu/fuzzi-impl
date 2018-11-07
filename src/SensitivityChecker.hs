@@ -438,6 +438,28 @@ whileRule :: (RuleConstraints e m)
           => Recur -> Rule m
 whileRule recur = (whilePat, whileFunc recur)
 
+termWhilePat :: CmdPattern
+termWhilePat = [cpat|
+while v(idx) < length(e(arr)) do
+  c(body);
+  v(idx) = v(idx) + 1;
+end
+|]
+
+termWhileFunc :: (RuleConstraints e m)
+              => RuleFunc m
+termWhileFunc d p uenv tctx sctx = do
+  case (uenv ^. (at "idx")
+       , uenv ^. (at "arr")
+       , uenv ^. (at "body")) of
+    (Just (UniVar idx), Just (UniExpr arr), Just (UniCmd body)) -> do
+      bodyMvs <- mvs body
+      return $ [(0, sctxUpdateBulk (S.elems bodyMvs) Nothing sctx)]
+    _ -> sensFail p $ "failed to match any terminating while loops"
+
+termWhileRule :: (RuleConstraints e m) => Rule m
+termWhileRule = (termWhilePat, termWhileFunc)
+
 ifPat :: CmdPattern
 ifPat = [cpat|
 if e(cond) then
@@ -913,6 +935,7 @@ fuzziTypingRules recur = [ assignRule
                          , laplaceRule
                          , skipRule
                          , whileRule recur
+                         , termWhileRule
                          , ifRule recur
                          , blockRule recur
                          , bmapRule recur

@@ -1,0 +1,138 @@
+/* Input partitions of data points */
+db_partitions:[1.0] { { [float(101)] } };
+/* Datapoints with extra 1's for biases */
+db1_partitions: { { [float(102)] } };
+
+/* The gradients computed from each row in each partition */
+dws_partitions: { { [float(101)] } };
+/* Model parameters, one for each partition */
+ws_partitions: { [float(101)] };
+
+/* initial weights */
+w: [float(101)];
+
+/* Auxillary variables used for array mapping the partitions */
+t_db: { [float(101)] };
+t_db1: { [float(102)] };
+i: int;
+
+/* Auxillary variables used for bag mapping inside the array map */
+tt_db: [float(101)];
+tt_db1 : [float(102)];
+j: int;
+clear_idx: int;
+
+/* Auxillary variables used for calculating the gradients */
+t_dws : { [float(101)] };
+t_dws_j : { float };
+tt_dws_j : float;
+tt_dws : [float(101)];
+t_ws: [float(101)];
+dt: float;
+temp: float;
+prob: float;
+sc: float;
+size: float;
+sum: float
+
+/* For each partition, extend each row with a constant 1 for bias */
+bmap(db_partitions, db1_partitions, t_db, i, t_db1, {
+  bmap(t_db, t_db1, tt_db, j, tt_db1, {
+    clear(tt_db1, clear_idx);
+    tt_db1[0] = 1.0;
+    clear_idx = 0;
+    clear_idx = 0;
+    while clear_idx < 101 do
+      { tt_db1[clear_idx+1] = tt_db[clear_idx]; };
+      clear_idx = clear_idx + 1;
+    end;
+    clear_idx = 0;
+  });
+
+  j = 0;
+  clear(tt_db, clear_idx);
+  clear(tt_db1, clear_idx);
+  clear_idx = 0;
+});
+
+i = 0;
+j = 0;
+
+clear_idx = 0;
+clear(tt_db1, clear_idx);
+
+clear_idx = 0;
+clear(tt_dws, clear_idx);
+
+/* Compute gradients for each partition */
+bmap(db1_partitions, dws_partitions, t_db1, i, t_dws, {
+  bmap(t_db1, t_dws, tt_db1, j, tt_dws, {
+    clear_idx = 0;
+    clear(tt_dws, clear_idx);
+
+    clear_idx = 0;
+    while clear_idx < 101 do
+      { tt_dws[clear_idx] = tt_db1[clear_idx] };
+      clear_idx = clear_idx + 1;
+    end;
+
+    dt = dot(tt_dws, w) / 1000.0;
+    temp = clip(exp(-1.0 * tt_db1[101] * dt), 10000.0);
+    prob = 1.0 / (1.0 + temp);
+    sc = (1.0 - prob) * tt_db1[101];
+    tt_dws = scale(sc, tt_dws);
+
+    dt = 0.0;
+    temp = 0.0;
+    prob = 0.0;
+    sc = 0.0;
+  });
+
+  dt = 0.0;
+  temp = 0.0;
+  prob = 0.0;
+  sc = 0.0;
+
+  j = 0;
+
+  clear_idx = 0;
+  clear(tt_db1, clear_idx);
+
+  clear_idx = 0;
+  clear(tt_dws, clear_idx);
+});
+
+t_dws = {};
+i = 0;
+j = 0;
+
+/* Compute new weights for each partition */
+bmap(dws_partitions, ws_partitions, t_dws, i, t_ws, {
+  size = fc(length(t_dws));
+  clear_idx = 0;
+  clear(t_ws, clear_idx);
+
+  clear_idx = 0;
+  while clear_idx < 101 do
+    {
+      sum = 0.0;
+      j = 0;
+      t_dws_j = {};
+      bmap(t_dws, t_dws_j, tt_dws, j, tt_dws_j, {tt_dws_j = tt_dws[clear_idx]});
+      bsum(t_dws_j, sum, j, tt_dws_j, 100000000.0);
+      t_ws[clear_idx] = sum / size;
+    };
+    clear_idx = clear_idx + 1;
+  end;
+
+  t_dws_j = {};
+
+  clear_idx = 0;
+  clear(tt_dws, clear_idx);
+
+  tt_dws_j = 0.0;
+  sum = 0.0;
+  j = 0;
+  size = 0.0;
+  clear_idx = 0;
+});
