@@ -447,18 +447,21 @@ end
 |]
 
 termWhileFunc :: (RuleConstraints e m)
-              => RuleFunc m
-termWhileFunc d p uenv tctx sctx = do
+              => Recur -> RuleFunc m
+termWhileFunc recur d p uenv tctx sctx = do
   case (uenv ^. (at "idx")
        , uenv ^. (at "arr")
        , uenv ^. (at "body")) of
     (Just (UniVar idx), Just (UniExpr arr), Just (UniCmd body)) -> do
+      let sctx' = recur (d - 1) sctx body
+      when (null sctx') $ do
+        sensFail p "body may not terminate"
       bodyMvs <- mvs body
       return $ [(0, sctxUpdateBulk (S.elems bodyMvs) Nothing sctx)]
     _ -> sensFail p $ "failed to match any terminating while loops"
 
-termWhileRule :: (RuleConstraints e m) => Rule m
-termWhileRule = (termWhilePat, termWhileFunc)
+termWhileRule :: (RuleConstraints e m) => Recur -> Rule m
+termWhileRule recur = (termWhilePat, termWhileFunc recur)
 
 ifPat :: CmdPattern
 ifPat = [cpat|
@@ -481,7 +484,7 @@ ifFunc recur d p uenv tctx sctx = do
           return [(max e1 e2, sctxtMax c1 c2) | (e1, c1) <- ctxs1, (e2, c2) <- ctxs2]
         _ -> do
           let s1 = recur (d - 1) sctx ct
-          let s2 = recur (d - 2) sctx cf
+          let s2 = recur (d - 1) sctx cf
           mvsBody <- S.union <$> mvs ct <*> mvs cf
           return [(max e1 e2, sctxUpdateBulk (S.elems mvsBody) Nothing $ sctxtMax c1 c2)
                  | (e1, c1) <- s1, (e2, c2) <- s2]
@@ -935,7 +938,7 @@ fuzziTypingRules recur = [ assignRule
                          , laplaceRule
                          , skipRule
                          , whileRule recur
-                         , termWhileRule
+                         -- , termWhileRule recur
                          , ifRule recur
                          , blockRule recur
                          , bmapRule recur
