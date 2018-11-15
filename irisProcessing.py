@@ -1,9 +1,9 @@
-import csv 
+import csv
 import json
 import re
 import random
 
-with open('Iris/iris.data', 'rb') as f:
+with open('Iris/iris.data', 'rt') as f:
 	reader = csv.reader(f)
 	l = list(reader)
 
