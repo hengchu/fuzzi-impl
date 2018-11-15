@@ -45,6 +45,17 @@ bsum(all_labels, label_sum, i, t_label_sum, 1.0);
 label_sum $= lap(1.0, label_sum);
 
 positive_fraction = label_sum / db_size;
+if positive_fraction < 0.0
+then
+  positive_fraction = 0.001;
+else
+  if positive_fraction > 1.0
+  then
+    positive_fraction = 0.999;
+  else
+    skip;
+  end
+end;
 negative_fraction = 1.0 - positive_fraction;
 
 j = 0;
@@ -78,6 +89,30 @@ while j < 57 do
     theta_positive[j] = positive_feature_sum_j / label_sum;
     theta_negative[j] = negative_feature_sum_j / label_sum;
 
+    if theta_positive[j] < 0.0
+    then
+      theta_positive[j] = 0.001;
+    else
+      if theta_positive[j] > 1.0
+      then
+        theta_positive[j] = 0.999;
+      else
+        skip;
+      end
+    end;
+
+    if theta_negative[j] < 0.0
+    then
+      theta_negative[j] = 0.001;
+    else
+      if theta_negative[j] > 1.0
+      then
+        theta_negative[j] = 0.999;
+      else
+        skip;
+      end
+    end;
+
     w[j] = log(theta_positive[j] / theta_negative[j])
          - log((1.0 - theta_positive[j]) / (1.0 - theta_negative[j]));
 
@@ -91,4 +126,5 @@ b = 0.0;
 i = 0;
 while i < length(b_collection) do
   b = b + b_collection[i];
+  i = i + 1;
 end
