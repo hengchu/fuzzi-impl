@@ -85,6 +85,12 @@ isTauNumericArray :: Tau -> Bool
 isTauNumericArray (TArr t _) = isTauNumericArray' True t
 isTauNumericArray _ = False
 
+tauNeedsCopy :: Tau -> Bool
+tauNeedsCopy (TArr _ _) = True
+tauNeedsCopy (TBag _) = True
+tauNeedsCopy (TRec _) = True
+tauNeedsCopy _ = False
+
 transDecl :: (Constraints c e m) => Decl -> m Doc
 transDecl (Decl _ x _ t) = do
   initDoc <- transInit t
@@ -165,9 +171,13 @@ transCmd (CAssign p (EVar _ x) e) = do
     Just (TArr _ _) -> do
       docE <- transExpr e 0
       return $ text x <+> equals <+> text "np.array" <> (parens docE)
-    Just _ -> do
-      docE <- transExpr e 0
-      return $ text x <+> equals <+> text "copy.deepcopy" <> (parens docE)
+    Just t
+      | tauNeedsCopy t -> do
+          docE <- transExpr e 0
+          return $ text x <+> equals <+> text "copy.deepcopy" <> (parens docE)
+      | otherwise -> do
+          docE <- transExpr e 0
+          return $ text x <+> equals <+> docE
     Nothing ->
       shapeFail p "bug in shape checker?"
 transCmd (CAssign _ (EIndex _ (EVar _ x) eidx) e) = do
@@ -177,10 +187,14 @@ transCmd (CAssign _ (EIndex _ (EVar _ x) eidx) e) = do
       docIdx <- transExpr eidx 0
       docE <- transExpr e 0
       return $ text x <> (brackets docIdx) <+> equals <+> text "np.array" <> (parens docE)
-    _ -> do
-      docIdx <- transExpr eidx 0
-      docE <- transExpr e 0
-      return $ text x <> (brackets docIdx) <+> equals <+> text "copy.deepcopy" <> (parens docE)
+    t | tauNeedsCopy t -> do
+          docIdx <- transExpr eidx 0
+          docE <- transExpr e 0
+          return $ text x <> (brackets docIdx) <+> equals <+> text "copy.deepcopy" <> (parens docE)
+      | otherwise -> do
+          docIdx <- transExpr eidx 0
+          docE <- transExpr e 0
+          return $ text x <> (brackets docIdx) <+> equals <+> docE
 transCmd (CAssign p (ELength _ (EVar _ x)) e) = do
   ctx <- askCtxt
   let tx = ctx ^. (at x)

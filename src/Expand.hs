@@ -171,7 +171,7 @@ v(idx) = 0;
 v(out) = 0.0;
 while v(idx) < length(v(in)) do
   v(t_in) = v(in)[v(idx)];
-  if v(t_in) < fesc(bound) then
+  if v(t_in) < -1.0 * fesc(bound) then
     v(out) = v(out) - fesc(bound);
   else
     if v(t_in) > fesc(bound) then

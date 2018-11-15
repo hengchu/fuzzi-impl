@@ -5,7 +5,7 @@ SIZE = 784
 
 w = mnist784.w
 
-g = open('testdata/mnist.json')
+g = open('testdata/mnist784.json')
 train = json.load(g)
 X = train['db']
 

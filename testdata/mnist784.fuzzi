@@ -85,7 +85,7 @@ repeat 785 {
 
   j_sum = 0.0;
   tsum = 0.0;
-  bsum(dws_j, j_sum, tsum, i, 2.0);
+  bsum(dws_j, j_sum, tsum, i, 1.0);
 
 
   j_sum $= lap(1.0, j_sum);
