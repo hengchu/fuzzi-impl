@@ -1,14 +1,14 @@
-db:[1.0] { [float(101)] };
-db1: { [float(102)] };
-trow: [float(101)];
-trow1: [float(102)];
+db:[1.0] { [float(785)] };
+db1: { [float(786)] };
+trow: [float(785)];
+trow1: [float(786)];
 
-w:      [float(101)];
-dws: {[float(101)]};
+w:      [float(785)];
+dws: {[float(785)]};
 dws_j: {float};
 j_sum: float;
 tf_out: float;
-twout: [float(101)];
+twout: [float(785)];
 
 i: int;
 clear_idx: int;
@@ -32,7 +32,7 @@ bmap(db, db1, trow, i, trow1, {
   trow1[0] = 1.0;
   clear_idx = 0;
   clear_idx = 0;
-  while clear_idx < 101 do
+  while clear_idx < 785 do
     { trow1[clear_idx + 1] = trow[clear_idx] };
     clear_idx = clear_idx + 1;
   end;
@@ -51,16 +51,16 @@ bmap(db1, dws, trow1, i, twout, {
   clear_idx = 0;
 
   clear_idx = 0;
-  while clear_idx < 101 do
+  while clear_idx < 785 do
     { twout[clear_idx] = trow1[clear_idx] };
     clear_idx = clear_idx + 1;
   end;
   clear_idx = 0;
 
   dt = dot(twout, w) / 1000.0;
-  temp = clip(exp(-1.0 * trow1[101] * dt), 10000.0);
+  temp = clip(exp(-1.0 * trow1[785] * dt), 10000.0);
   prob = 1.0 / (1.0 + temp);
-  sc = (1.0 - prob) * trow1[101];
+  sc = (1.0 - prob) * trow1[785];
   twout = scale(sc, twout);
 
   dt = 0.0;
@@ -78,7 +78,7 @@ clear_idx = 0;
 
 /* Project out each column of the gradient, sum up, and release */
 clear_idx = 0;
-while clear_idx < 101 do
+while clear_idx < 785 do
   {
     bmap(dws, dws_j, twout, i, tf_out, { tf_out = twout[clear_idx]; });
     i = 0;
@@ -86,7 +86,7 @@ while clear_idx < 101 do
     bsum(dws_j, j_sum, i, tf_out, 1.0);
     j_sum $= lap(1.0, j_sum);
 
-    w[clear_idx] = w[clear_idx] + j_sum / size;
+    w[clear_idx] = w[clear_idx] + j_sum / size * 0.1;
   };
   clear_idx = clear_idx + 1;
 end

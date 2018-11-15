@@ -21,9 +21,9 @@ for i in range(len(labels)):
         if (labels[i] * results[i] > 0 ):
                 correct = correct + 1
 
-print "labels: " + str(labels)
-print "results: " + str(results)
-print "w[0]: " + str(w[0])
+print ("labels: " + str(labels))
+print ("results: " + str(results))
+print ("w[0]: " + str(w[0]))
 #print "w: " + str(w)
 #print "graident: " + str(mnist784.dws)
 

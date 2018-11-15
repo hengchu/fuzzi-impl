@@ -8,7 +8,7 @@ import re
 #from matplotlib import pyplot as plt
 
 ORIG_SIZE = 28;
-NEW_SIZE = 10;
+NEW_SIZE = 28;
 NUM_PARTITIONS = 10;
 
 #Total number of available samples, can set to less if we don't need all of them
@@ -85,12 +85,12 @@ images_with_labels = [smaller_images[i] + [binary_labels[i]] for i in range(N)]
 #       outfile.write('}')
 
 data['db'] = images_with_labels
-data['trow1'] = [1.0] + 785*[0.0]
+data['trow1'] = [1.0] + (NEW_SIZE * NEW_SIZE + 1)*[0.0]
 data['db1'] = []
-data['wout'] = 101*[0.0]
+data['wout'] = (NEW_SIZE * NEW_SIZE + 1)*[0.0]
 data['dws'] = []
 data['dws_j'] = []
-data['w'] = 101*[0.0]
+data['w'] = (NEW_SIZE * NEW_SIZE + 1)*[0.0]
 data['w_total'] = []
 data['j_sum'] = 0.0
 
