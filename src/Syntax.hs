@@ -53,14 +53,14 @@ data Expr = EVar     Position Var
           | EExp     Position Expr
           | ELog     Position Expr
           | EClip    Position
-                     Expr     -- ^Expression to be clipped
-                     Lit      -- ^The bound
+                     Expr     -- Expression to be clipped
+                     Lit      -- The bound
           | EScale   Position
-                     Expr     -- ^Scalar
-                     Expr     -- ^Vector
+                     Expr     -- Scalar
+                     Expr     -- Vector
           | EDot     Position
-                     Expr     -- ^Vector
-                     Expr     -- ^Vector
+                     Expr     -- Vector
+                     Expr     -- Vector
   deriving (Generic, Show, Eq, Ord, Data)
 
 data AtomPattern a = AtomExact a
