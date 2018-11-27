@@ -99,6 +99,10 @@ library
                    , UndecidableInstances
                    , FunctionalDependencies
                    , DataKinds
+                   , GADTs
+                   , StandaloneDeriving
+                   , EmptyDataDeriving
+                   , DeriveAnyClass
 executable fuzzi
   main-is: Main.hs
   hs-source-dirs:
