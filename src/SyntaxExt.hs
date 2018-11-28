@@ -2,6 +2,7 @@ module SyntaxExt where
 
 import Syntax (Var, Binop(..))
 
+import Data.Constraint
 import Type.Reflection
 import Data.List (intercalate)
 import Data.Either (either)
@@ -125,12 +126,69 @@ type Imp = CAssign :+: CLaplace :+: CIf
            :+: CWhile :+: CSeq :+: CSkip :+: Expr
 
 -- |The extended Imp language with extensions
-type Imp' = ExtVar C :+: CExtDecl :+: CExt :+: Expr'
+type Imp' = ExtVar C :+: CAssign :+: CLaplace :+: CIf
+           :+: CWhile :+: CSeq :+: CSkip :+: ExtVar E :+: Expr
 
-$(derive [makeTraversable, makeFoldable, makeEqF, makeShowF,
-          smartConstructors, smartAConstructors]
+$(derive [makeTraversable, makeFoldable, makeEqF, makeShowF]
          [''CAssign, ''CLaplace, ''CIf, ''CWhile,
           ''CSeq, ''CSkip, ''CExt, ''CExtDecl])
+
+evidence :: Dict (Expr' :<: Imp')
+evidence = undefined
+
+iCAssign :: (Functor e, CAssign :<: c, e :<: c)
+         => Cxt h e a -> Cxt h e a -> Cxt h c a
+iCAssign e1 e2 = inject $ CAssign (deepInject e1) (deepInject e2)
+
+iCAssign' :: Cxt h Expr' a -> Cxt h Expr' a -> Cxt h Imp' a
+iCAssign' = withDict evidence (iCAssign @Expr' @Imp')
+
+{-
+iCLaplace :: (Functor e, CLaplace :<: c, e :<: c)
+          => Var -> Float -> Cxt h e a -> Cxt h c a
+iCLaplace x w e = inject $ CLaplace x w (deepInject e)
+
+iCLaplace' :: Var -> Float -> Cxt h Expr' a -> Cxt h Imp' a
+iCLaplace' = iCLaplace
+
+iCIf :: (Functor e, CIf :<: c, e :<: c)
+     => Cxt h e a -> Cxt h c a -> Cxt h c a -> Cxt h c a
+iCIf e c1 c2 = inject $ CIf (deepInject e) c1 c2
+
+iCIf' :: Cxt h Expr' a -> Cxt h Imp' a -> Cxt h Imp' a -> Cxt h Imp' a
+iCIf' = iCIf
+
+iCWhile :: (Functor e, CWhile :<: c, e :<: c)
+        => Cxt h e a -> Cxt h c a -> Cxt h c a
+iCWhile e c = inject $ CWhile (deepInject e) c
+
+iCWhile' :: Cxt h Expr' a -> Cxt h Imp' a -> Cxt h Imp' a
+iCWhile' = iCWhile
+
+iCSeq :: (CSeq :<: c)
+      => Cxt h c a -> Cxt h c a -> Cxt h c a
+iCSeq c1 c2 = inject $ CSeq c1 c2
+
+iCSkip :: (CSkip :<: c)
+       => Cxt h c a
+iCSkip = inject CSkip
+
+emptyCExtParams :: (CExt :<: c) => [Cxt h c a]
+emptyCExtParams = []
+
+consCExtParams :: (Functor e, CExt :<: c, e :<: c)
+               => Cxt h e a -> [Cxt h c a] -> [Cxt h c a]
+consCExtParams x xs = (deepInject x):xs
+
+consCExtParams' :: (CExt :<: c) => Cxt h c a -> [Cxt h c a] -> [Cxt h c a]
+consCExtParams' = (:)
+
+iCExt :: (CExt :<: c) => String -> [Cxt h c a] -> Cxt h c a
+iCExt name params = inject $ CExt name params
+
+iCExtDecl :: (CExtDecl :<: c) => String -> [AnyExtVar] -> Cxt h c a -> Cxt h c a
+iCExtDecl name bvs defn = inject $ CExtDecl name bvs defn
+-}
 
 type Sort = Either C E
 
@@ -267,12 +325,8 @@ instance Wellformed CExtDecl where
       Left C -> return $ Left C
       _ -> Nothing
 
-{-
-
 instance HasVars (ExtVar E) (ExtVar E e) where
-  isVar a =
-    case a of
-      EExtVar v -> Just (EExtVar v)
+  isVar (EExtVar v) = Just (EExtVar v)
 
 instance HasVars EVar     (ExtVar E e)
 instance HasVars ELength  (ExtVar E e)
@@ -287,22 +341,17 @@ instance HasVars EClip    (ExtVar E e)
 instance HasVars EScale   (ExtVar E e)
 instance HasVars EDot     (ExtVar E e)
 
-instance HasVars (ExtVar C) (ExtVar C c) where
-  isVar a =
-    case a of
-      CExtVar v -> Just (CExtVar v)
-
-instance HasVars (ExtVar C)   (ExtVar E e)
-instance HasVars (CAssign e)  (ExtVar E e)
-instance HasVars (CLaplace e) (ExtVar E e)
-instance HasVars (CIf e)      (ExtVar E e)
-instance HasVars (CWhile e)   (ExtVar E e)
-instance HasVars CSeq         (ExtVar E e)
-instance HasVars CSkip        (ExtVar E e)
-instance HasVars (CExt e)     (ExtVar E e)
-instance HasVars CExtDecl     (ExtVar E e) where
-  bindsVars (CExtDecl _ vars c) = c |-> foldr iter S.empty vars
-    where iter :: AnyExtVar -> S.Set (ExtVar E c) -> S.Set (ExtVar E c)
+instance HasVars CAssign  (ExtVar E e)
+instance HasVars CLaplace (ExtVar E e)
+instance HasVars CIf      (ExtVar E e)
+instance HasVars CWhile   (ExtVar E e)
+instance HasVars CSeq     (ExtVar E e)
+instance HasVars CSkip    (ExtVar E e)
+instance HasVars CExt     (ExtVar E e)
+instance HasVars CExtDecl (ExtVar E e) where
+  bindsVars (CExtDecl _ vars c) =
+    c |-> foldr iter S.empty vars
+    where iter :: AnyExtVar -> S.Set (ExtVar E e) -> S.Set (ExtVar E e)
           iter v bvs =
             case v of
               AnyExtVar v' ->
@@ -312,17 +361,22 @@ instance HasVars CExtDecl     (ExtVar E e) where
                       EExtVar v'' -> S.insert (EExtVar v'') bvs
                   _ -> bvs
 
-instance HasVars (CAssign e)  (ExtVar C c)
-instance HasVars (CLaplace e) (ExtVar C c)
-instance HasVars (CIf e)      (ExtVar C c)
-instance HasVars (CWhile e)   (ExtVar C c)
-instance HasVars CSeq         (ExtVar C c)
-instance HasVars CSkip        (ExtVar C c)
-instance HasVars (CExt e)     (ExtVar C c)
-instance HasVars CExtDecl     (ExtVar C c) where
-  bindsVars (CExtDecl _ vars c) = c |-> foldr iter S.empty vars
-    where  iter :: AnyExtVar -> S.Set (ExtVar C c) -> S.Set (ExtVar C c)
-           iter v bvs =
+instance HasVars (ExtVar C) (ExtVar E e)
+instance HasVars (ExtVar C) (ExtVar C c) where
+  isVar (CExtVar v) = Just (CExtVar v)
+
+instance HasVars CAssign  (ExtVar C c)
+instance HasVars CLaplace (ExtVar C c)
+instance HasVars CIf      (ExtVar C c)
+instance HasVars CWhile   (ExtVar C c)
+instance HasVars CSeq     (ExtVar C c)
+instance HasVars CSkip    (ExtVar C c)
+instance HasVars CExt     (ExtVar C c)
+instance HasVars CExtDecl (ExtVar C c) where
+  bindsVars (CExtDecl _ vars c) =
+    c |-> foldr iter S.empty vars
+    where iter :: AnyExtVar -> S.Set (ExtVar C e) -> S.Set (ExtVar C e)
+          iter v bvs =
             case v of
               AnyExtVar v' ->
                 case eqTypeRep (varSort v') (typeRep @C) of
@@ -330,7 +384,6 @@ instance HasVars CExtDecl     (ExtVar C c) where
                     case v' of
                       CExtVar v'' -> S.insert (CExtVar v'') bvs
                   _ -> bvs
--}
 
 e1 :: Term Expr'
 e1 = iEBinop PLUS (iELit (LInt 1)) (iEExtVar "x")
@@ -338,11 +391,10 @@ e1 = iEBinop PLUS (iELit (LInt 1)) (iEExtVar "x")
 e2 :: Term Expr'
 e2 = iEBinop MINUS (iEVar "y") (iEVar "z")
 
-e3 :: Term Imp'
-e3 = iEBinop PLUS (iELit (LInt 1)) (iCExtVar "x")
+e4 :: Term Expr'
+e4 = substVars (\v -> if v == (EExtVar "x") then Just e2 else Nothing) e1
 
---e3 :: Term Expr'
---e3 = substVars (\v -> if v == (EExtVar "x") then Just e2 else Nothing) e1
-
---c1 :: Term Imp'
---c1 = iCAssign e1 e2
+{-
+c1 :: Term Imp'
+c1 = iCAssign' e1 e2
+-}

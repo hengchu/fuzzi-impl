@@ -52,6 +52,7 @@ library
               , template-haskell
               , generic-random
               , compdata
+              , constraints
   exposed-modules:
                   Lib
                 , Syntax
@@ -96,7 +97,7 @@ library
                    , TemplateHaskell
                    , ConstraintKinds
                    , MultiParamTypeClasses
-                   , UndecidableInstances
+                   , KindSignatures
                    , FunctionalDependencies
                    , DataKinds
                    , GADTs
