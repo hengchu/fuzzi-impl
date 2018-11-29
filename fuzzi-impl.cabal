@@ -96,13 +96,13 @@ library
                    , QuasiQuotes
                    , TemplateHaskell
                    , ConstraintKinds
+                   , UndecidableInstances
                    , MultiParamTypeClasses
                    , KindSignatures
                    , FunctionalDependencies
                    , DataKinds
                    , GADTs
                    , StandaloneDeriving
-                   , EmptyDataDeriving
                    , DeriveAnyClass
 executable fuzzi
   main-is: Main.hs
