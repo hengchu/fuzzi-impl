@@ -92,7 +92,10 @@ data Expr e = EVar Var
             | EDot e e
             deriving Functor
 
-type Expr' = ExtVar E :+: Expr
+type ExprP  = Expr :&: Position
+
+type Expr'  = ExtVar E :+: Expr
+type ExprP' = (ExtVar E :&: Position) :+: ExprP
 
 $(derive [makeTraversable, makeFoldable, makeEqF,
           makeShowF, smartConstructors, smartAConstructors]
@@ -106,6 +109,8 @@ data Cmd c = CAssign c c
            | CSkip
            deriving Functor
 
+type CmdP = Cmd :&: Position
+
 data CExt c = CExt String [c]
   deriving (Functor)
 data CExtDecl c = CExtDecl String [AnyExtVar] c
@@ -113,19 +118,53 @@ data CExtDecl c = CExtDecl String [AnyExtVar] c
 
 -- The language where extension definition is not allowed, but extension
 -- application is possible
-type Cmd'  = ExtVar C :+: CExt :+: Cmd
+type Cmd'  = ExtVar C
+           :+: CExt
+           :+: Cmd
+type CmdP' =   (ExtVar C :&: Position)
+           :+: (CExt     :&: Position)
+           :+: (Cmd      :&: Position)
 
 -- The language for advanced users who want to define their own extensions
-type Cmd'' = ExtVar C :+: CExt :+: CExtDecl :+: Cmd
+type Cmd''  =   ExtVar C
+            :+: CExt
+            :+: CExtDecl
+            :+: Cmd
+type CmdP'' =   (ExtVar C :&: Position)
+            :+: (CExt     :&: Position)
+            :+: (CExtDecl :&: Position)
+            :+: (Cmd      :&: Position)
 
 -- The vanilla IMP language
-type Imp = Expr :+: Cmd
+type Imp  =   Expr :+: Cmd
+type ImpP =   Expr :&: Position
+          :+: CmdP :&: Position
 
 -- |The extended Imp language with extensions
-type Imp' = Expr' :+: Cmd'
+type Imp'  =   ExtVar E
+           :+: Expr
+           :+: ExtVar C
+           :+: CExt
+           :+: Cmd
+type ImpP' =   ExtVar E :&: Position
+           :+: Expr     :&: Position
+           :+: ExtVar C :&: Position
+           :+: CExt     :&: Position
+           :+: Cmd      :&: Position
 
 -- |The extended Imp language with extensions and extension definition
-type Imp'' = Expr' :+: Cmd''
+type Imp''  =   ExtVar E
+            :+: Expr
+            :+: ExtVar C
+            :+: CExt
+            :+: CExtDecl
+            :+: Cmd
+type ImpP'' =   ExtVar E :&: Position
+            :+: Expr     :&: Position
+            :+: ExtVar C :&: Position
+            :+: CExt     :&: Position
+            :+: CExtDecl :&: Position
+            :+: Cmd      :&: Position
 
 $(derive [makeTraversable, makeFoldable, makeEqF, makeShowF,
           smartConstructors, smartAConstructors]
@@ -233,6 +272,9 @@ instance HasVars CExt AnyExtVar
 instance HasVars CExtDecl AnyExtVar where
   bindsVars (CExtDecl _ vars c) =
     c |-> S.fromList vars
+
+cmd2Position :: Term ImpP'' -> Position
+cmd2Position c = snd . (projectA @Imp'') . unTerm $ c
 
 {-
 

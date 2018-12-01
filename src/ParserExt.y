@@ -1,4 +1,7 @@
 {
+
+{-# OPTIONS_GHC -Wno-unused-imports #-}
+
 module ParserExt where
 
 import Data.Foldable
@@ -10,6 +13,7 @@ import Control.Monad.State.Strict
 import LexerExt
 import SyntaxExt
 import Data.Comp
+import Data.Comp.Annotation
 import Data.Map (fromList)
 import Prelude hiding (LT, GT, EQ)
 
@@ -84,36 +88,39 @@ import Prelude hiding (LT, GT, EQ)
 
 %%
 
-Cmd
+Cmd :: { Term ImpP'' }
 : ident ':' cmd
 {% do
     v <- getIdent $1
     useExtVarAs v Command (token2Position $1)
-    return $ iCExtVar v
+    return (inject $ CExtVar v :&: (token2Position $1))
 }
 | skip
-{ iCSkip }
+{ inject $ CSkip :&: (token2Position $1) }
 | Expr '=' Expr
-{ iCAssign (deepInject $1) (deepInject $3) }
+{ inject $ CAssign (deepInject $1) (deepInject $3) :&: (token2Position $2) }
 | Expr '$=' laplace '(' FloatExpr ',' Expr ')'
-{ iCLaplace (deepInject $1) (snd $5) (deepInject $7) }
+{ inject $ CLaplace (deepInject $1) (snd $5) (deepInject $7) :&: (token2Position $2) }
 | if Expr then Cmd else Cmd end
-{ iCIf (deepInject $2) $4 $6 }
+{ inject $ CIf (deepInject $2) $4 $6 :&: (token2Position $1) }
 | while Expr do Cmd end
-{ iCWhile (deepInject $2) $4 }
+{ inject $ CWhile (deepInject $2) $4 :&: (token2Position $1) }
 | Cmd ';'
 { $1 }
 | Cmd ';' Cmd
-{ iCSeq $1 $3 }
+{
+  let p = cmd2Position $1
+  in inject $ CSeq $1 $3 :&: p
+}
 | ident '(' ExtensionParams ')'
 {% do
     extName <- getIdent $1
-    return $ iCExt extName $3
+    return $ iACExt (token2Position $1) extName $3
 }
 | extension ident '(' PushManyIdents ')' '{' Cmd '}' PopManyIdents
 {% do
     extName <- getIdent $2
-    return $ iCExtDecl extName $9 $7
+    return $ iACExtDecl (token2Position $1) extName $9 $7
 }
 
 PushManyIdents
@@ -141,12 +148,12 @@ ManyIdents
     return $ v:$3
 }
 
-ExtensionParam
+ExtensionParam :: { Term ImpP'' }
 : ident ':' expr
 {% do
     v <- getIdent $1
     useExtVarAs v Expression (token2Position $1)
-    return $ iEExtVar v
+    return $ inject $ EExtVar v :&: (token2Position $1)
 }
 | Expr
 { deepInject $1 }
@@ -185,17 +192,17 @@ BoolExpr
 
 Literal
 : IntExpr
-{ (LInt $ snd $1) }
+{ (fst $1, LInt $ snd $1) }
 | FloatExpr
-{ (LFloat $ snd $1) }
+{ (fst $1, LFloat $ snd $1) }
 | BoolExpr
-{ (LBool $ snd $1) }
+{ (fst $1, LBool $ snd $1) }
 | '[' ManyExprs ']'
-{ (LArr $2) }
+{ (token2Position $1, LArr $2) }
 | '{' ManyExprs '}'
-{ (LBag $2) }
+{ (token2Position $1, LBag $2) }
 
-AtomExpr
+AtomExpr :: { Term ExprP' }
 : ident
 {% do
   v <- getIdent $1
@@ -203,61 +210,61 @@ AtomExpr
   case isVExtVar of
     True -> do
       useExtVarAs v Expression (token2Position $1)
-      return $ iEExtVar v
-    False -> return $ iEVar v
+      return $ iAEExtVar (token2Position $1) v
+    False -> return $ iAEVar (token2Position $1) v
 }
 | Literal
-{ iELit $1 }
+{ iAELit (fst $1) (snd $1) }
 | '(' Expr ')'
 { $2 }
 
 IndexExpr
 : AtomExpr '[' Expr ']'
-{ iEIndex $1 $3 }
+{ iAEIndex (token2Position $2) $1 $3 }
 | IndexExpr '[' Expr ']'
-{ iEIndex $1 $3 }
+{ iAEIndex (token2Position $2) $1 $3 }
 
-Expr
+Expr :: { Term ExprP' }
 : AtomExpr
 { $1 }
 | IndexExpr
 { $1 }
 | length '(' Expr ')'
-{ iELength $3 }
+{ inject $ ELength $3 :&: (token2Position $1) }
 | Expr '+' Expr
-{ iEBinop PLUS $1 $3 }
+{ inject $ EBinop PLUS $1 $3 :&: (token2Position $2) }
 | Expr '-' Expr
-{ iEBinop MINUS $1 $3 }
+{ inject $ EBinop MINUS $1 $3 :&: (token2Position $2) }
 | Expr '*' Expr
-{ iEBinop MULT $1 $3 }
+{ inject $ EBinop MULT $1 $3 :&: (token2Position $2) }
 | Expr '/' Expr
-{ iEBinop DIV $1 $3 }
+{ inject $ EBinop DIV $1 $3 :&: (token2Position $2) }
 | Expr '<' Expr
-{ iEBinop LT $1 $3 }
+{ inject $ EBinop LT $1 $3 :&: (token2Position $2) }
 | Expr '<=' Expr
-{ iEBinop LE $1 $3 }
+{ inject $ EBinop LE $1 $3 :&: (token2Position $2) }
 | Expr '>' Expr
-{ iEBinop GT $1 $3 }
+{ inject $ EBinop GT $1 $3 :&: (token2Position $2) }
 | Expr '>=' Expr
-{ iEBinop GE $1 $3 }
+{ inject $ EBinop GE $1 $3 :&: (token2Position $2) }
 | Expr '==' Expr
-{ iEBinop EQ $1 $3 }
+{ inject $ EBinop EQ $1 $3 :&: (token2Position $2) }
 | Expr '!=' Expr
-{ iEBinop NEQ $1 $3 }
+{ inject $ EBinop NEQ $1 $3 :&: (token2Position $2) }
 | Expr '&&' Expr
-{ iEBinop AND $1 $3 }
+{ inject $ EBinop AND $1 $3 :&: (token2Position $2) }
 | Expr '||' Expr
-{ iEBinop OR $1 $3 }
+{ inject $ EBinop OR $1 $3 :&: (token2Position $2) }
 | log '(' Expr ')'
-{ iELog $3 }
+{ inject $ ELog $3 :&: (token2Position $1) }
 | exp '(' Expr ')'
-{ iEExp $3 }
+{ inject $ EExp $3 :&: (token2Position $1) }
 | scale '(' Expr ',' Expr ')'
-{ iEScale $3 $5 }
+{ inject $ EScale $3 $5 :&: (token2Position $1) }
 | dot '(' Expr ',' Expr ')'
-{ iEDot $3 $5 }
+{ inject $ EDot $3 $5 :&: (token2Position $1) }
 | clip '(' Expr ',' Literal ')'
-{ iEClip $3 $5 }
+{ inject $ EClip $3 (snd $5) :&: (token2Position $1) }
 
 ManyExprs
 :
@@ -269,8 +276,8 @@ ManyExprs
 
 {
 
-parseCmd  :: [Token] -> Parser (Term Imp'')
-parseExpr :: [Token] -> Parser (Term Expr')
+parseCmd  :: [Token] -> Parser (Term ImpP'')
+parseExpr :: [Token] -> Parser (Term ExprP')
 
 type SortPosition = (SyntaxSort, Position)
 
