@@ -67,6 +67,8 @@ library
                 , ShapeChecker
                 , SensitivityChecker
                 , Python
+                , LexerExt
+                , ParserExt
                 , SyntaxExt
   build-tools:
       alex, happy
