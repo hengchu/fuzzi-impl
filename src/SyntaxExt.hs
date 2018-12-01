@@ -99,7 +99,7 @@ $(derive [makeTraversable, makeFoldable, makeEqF,
          [''Expr, ''ExtVar])
 
 data Cmd c = CAssign c c
-           | CLaplace Var Float c
+           | CLaplace c Float c
            | CIf c c c
            | CWhile c c
            | CSeq c c
@@ -123,6 +123,9 @@ type Imp = Expr :+: Cmd
 
 -- |The extended Imp language with extensions
 type Imp' = Expr' :+: Cmd'
+
+-- |The extended Imp language with extensions and extension definition
+type Imp'' = Expr' :+: Cmd''
 
 $(derive [makeTraversable, makeFoldable, makeEqF, makeShowF,
           smartConstructors, smartAConstructors]
@@ -194,8 +197,9 @@ instance Wellformed Cmd where
     guard (e1 == Expression)
     guard (e2 == Expression)
     return Command
-  syntaxSort (CLaplace _ _ e) = do
-    guard (e == Expression)
+  syntaxSort (CLaplace e1 _ e2) = do
+    guard (e1 == Expression)
+    guard (e2 == Expression)
     return Command
   syntaxSort (CIf e c1 c2) = do
     guard (e == Expression)

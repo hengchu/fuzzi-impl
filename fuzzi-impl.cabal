@@ -54,20 +54,20 @@ library
               , compdata
               , constraints
   exposed-modules:
-                  Lib
-                , Syntax
-                , Lexer
-                , PatternLexer
-                , Parser
-                , PatternParser
-                , Match
-                , Pretty
-                , PatternQQ
-                , Expand
-                , ShapeChecker
-                , SensitivityChecker
-                , Python
-                , LexerExt
+                --   Lib
+                -- , Syntax
+                -- , Lexer
+                -- , PatternLexer
+                -- , Parser
+                -- , PatternParser
+                -- , Match
+                -- , Pretty
+                -- , PatternQQ
+                -- , Expand
+                -- , ShapeChecker
+                -- , SensitivityChecker
+                -- , Python
+                  LexerExt
                 , ParserExt
                 , SyntaxExt
   build-tools:
@@ -105,7 +105,6 @@ library
                    , DataKinds
                    , GADTs
                    , StandaloneDeriving
-                   , DeriveAnyClass
 executable fuzzi
   main-is: Main.hs
   hs-source-dirs:

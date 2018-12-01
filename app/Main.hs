@@ -1,5 +1,6 @@
 module Main where
 
+{-
 import Data.List
 
 import qualified Text.Tabular as TT
@@ -145,3 +146,6 @@ main = do
           outputFd <- if outputFile == "-" then return stdout else openFile outputFile WriteMode
           hPutStrLn outputFd $ render pythonCode
           exitSuccess
+-}
+
+main = return ()
