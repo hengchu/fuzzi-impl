@@ -2,7 +2,12 @@
 
 module SyntaxExt where
 
+import Control.Monad
+import Control.Monad.State.Strict
+import Control.Monad.Except
+import Control.Monad.Writer.Strict
 import Type.Reflection
+import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Comp
 import Data.Comp.Show ()
@@ -95,7 +100,7 @@ data Expr e = EVar Var
 type ExprP  = Expr :&: Position
 
 type Expr'  = ExtVar E :+: Expr
-type ExprP' = (ExtVar E :&: Position) :+: ExprP
+type ExprP' = (ExtVar E :&: Position) :+: Expr :&: Position
 
 $(derive [makeTraversable, makeFoldable, makeEqF,
           makeShowF, smartConstructors, smartAConstructors]
@@ -114,6 +119,8 @@ type CmdP = Cmd :&: Position
 data CExt c = CExt String [c]
   deriving (Functor)
 data CExtDecl c = CExtDecl String [AnyExtVar] c
+  deriving (Functor)
+data CTCHint c = CTCHint String [c] c
   deriving (Functor)
 
 -- The language where extension definition is not allowed, but extension
@@ -138,7 +145,7 @@ type CmdP'' =   (ExtVar C :&: Position)
 -- The vanilla IMP language
 type Imp  =   Expr :+: Cmd
 type ImpP =   Expr :&: Position
-          :+: CmdP :&: Position
+          :+: Cmd  :&: Position
 
 -- |The extended Imp language with extensions
 type Imp'  =   ExtVar E
@@ -166,9 +173,15 @@ type ImpP'' =   ExtVar E :&: Position
             :+: CExtDecl :&: Position
             :+: Cmd      :&: Position
 
+-- |The language that the typechecker sees, we remove all extension declarations
+-- and extension application, but leave hints to the typechecker
+type ImpTC =   Expr     :&: Position
+           :+: Cmd      :&: Position
+           :+: CTCHint  :&: Position
+
 $(derive [makeTraversable, makeFoldable, makeEqF, makeShowF,
           smartConstructors, smartAConstructors]
-         [''Cmd, ''CExt, ''CExtDecl])
+         [''Cmd, ''CExt, ''CExtDecl, ''CTCHint])
 
 data SyntaxSort = Expression | Command
   deriving (Show, Eq, Ord)
@@ -180,10 +193,6 @@ $(derive [liftSum] [''Wellformed])
 
 instance Wellformed (ExtVar E) where
   syntaxSort _ = return Expression
-
-guard :: Bool -> Maybe ()
-guard True = return ()
-guard False = Nothing
 
 instance Wellformed Expr where
   syntaxSort (EVar _) = return Expression
@@ -276,21 +285,129 @@ instance HasVars CExtDecl AnyExtVar where
 cmd2Position :: Term ImpP'' -> Position
 cmd2Position c = snd . (projectA @Imp'') . unTerm $ c
 
-{-
+expr2Position :: Term ExprP' -> Position
+expr2Position e = snd . (projectA @Expr') . unTerm $ e
 
-e1 :: Term Expr'
-e1 = iEBinop PLUS (iELit (LInt 1)) (iEExtVar "x")
+-- A map from extension name to the list of bound variables, and the body of the
+-- extension
+type ExtensionLibrary = M.Map String ([AnyExtVar], Term ImpP')
 
-e2 :: Term Expr'
-e2 = iEBinop MINUS (iEVar "y") (iEVar "z")
+data ExpandError = UnknownExtension Position String
+                 | MismatchingNumberOfParams Position Int Int -- num bvs, num params
+                 deriving (Show, Eq, Ord)
 
-e4 :: Term Expr'
-e4 = substVars (\v -> if v == (AnyExtVar $ EExtVar "x") then Just e2 else Nothing) e1
+expand :: ExtensionLibrary -> Term ImpP' -> Either [ExpandError] (Term ImpP')
+expand lib c =
+  case runWriter (expand' lib c) of
+    (c', [])  -> Right c'
+    (_, errs) -> Left errs
 
-c1 :: Term Imp'
-c1 = iCAssign (deepInject e1) (deepInject e2)
+expand' :: (MonadWriter [ExpandError] m)
+        => ExtensionLibrary -> Term ImpP' -> m (Term ImpP')
+expand' lib c = cataM (expandAlg lib) c
 
-c2 :: Term Imp'
-c2 = iCExt "test" [deepInject e1, deepInject e2, c1, iCExtVar "z"]
+class Expand f where
+  expandAlg :: (MonadWriter [ExpandError] m)
+            => ExtensionLibrary -> AlgM m f (Term ImpP')
 
--}
+instance (Expand f1, Expand f2) => Expand (f1 :+: f2) where
+  expandAlg lib = caseF (expandAlg lib) (expandAlg lib)
+
+instance {-# OVERLAPPABLE #-}
+  (Functor f, f :<: ImpP') => Expand f where
+  expandAlg _ = return . inject
+
+instance Expand (CExt :&: Position) where
+  expandAlg lib c@(CExt name params :&: p) =
+    case M.lookup name lib of
+      Nothing ->
+        reportError
+          (UnknownExtension p name)
+          (return . inject $ c)
+      Just (bvs, bodyP)
+        | length bvs == length params -> do
+            let substCxt = M.fromList $ zip bvs (map stripA params)
+            expandedBodyP <- expand' lib bodyP
+            case stripA expandedBodyP of
+              body -> return $ ann p $ appSubst substCxt body
+        | otherwise ->
+            reportError
+              (MismatchingNumberOfParams p (length bvs) (length params))
+              (return . inject $ c)
+
+reportError :: (MonadWriter [e] m) => e -> m a -> m a
+reportError e m = tell [e] >> m
+
+data RemoveCExtError = UnexpandedCExt Position String
+                     | FreeExtensionVariable Position Var
+                     | UnexpectedExtensionDeclaration Position String
+                     | NestedExtensionDeclaration Position String
+                     | DuplicateExtensionDeclaration Position String
+  deriving (Show, Eq, Ord)
+
+class RemoveCExtDecl f g where
+  removeCExtDeclHom :: (MonadError RemoveCExtError m) => HomM m f g
+
+instance {-# OVERLAPPABLE #-}
+  (f :<: g, Functor g) => RemoveCExtDecl f g where
+  removeCExtDeclHom = return . simpCxt . inj
+
+$(derive [liftSum] [''RemoveCExtDecl])
+
+instance
+  (Cmd :&: Position :<: g) => RemoveCExtDecl (CExtDecl :&: Position) g where
+  removeCExtDeclHom (CExtDecl _ _ _ :&: p) = return $ inject (CSkip :&: p)
+
+removeCExtDecl'' :: Term ImpP'' -> Either RemoveCExtError (Term ImpP')
+removeCExtDecl'' t = appHomM removeCExtDeclHom t
+
+class CollectCExtDecl f where
+  collectCExtDecl :: ( MonadWriter [RemoveCExtError] m
+                     , MonadState ExtensionLibrary m)
+                  => AlgM m f (Term ImpP'')
+
+$(derive [liftSum] [''CollectCExtDecl])
+
+getExtensionLibrary :: Term ImpP'' -> Either [RemoveCExtError] ExtensionLibrary
+getExtensionLibrary t =
+  case runWriter $ execStateT (cataM collectCExtDecl t) M.empty of
+    (lib, []) -> Right lib
+    (_, errs) -> Left errs
+
+instance {-# OVERLAPPABLE #-}
+  (f :<: ImpP'') => CollectCExtDecl f where
+  collectCExtDecl t = return (inject t)
+
+instance CollectCExtDecl (CExtDecl :&: Position) where
+  collectCExtDecl c@(CExtDecl name bvs body :&: p) = do
+    lib <- get
+    case M.lookup name lib of
+      Just _ ->
+        reportError
+          (DuplicateExtensionDeclaration p name)
+          (return . inject $ c)
+      Nothing ->
+        case deepProject @ImpP' body of
+          Just body' -> do
+            put $ M.insert name (bvs, body') lib
+            return $ inject c
+          Nothing ->
+            reportError
+              (NestedExtensionDeclaration p name)
+              (return $ inject c)
+
+data DesugarError = RemoveCExtE [RemoveCExtError]
+                  | ExpandE [ExpandError]
+                  deriving (Show, Eq, Ord)
+
+desugarExtensions :: Term ImpP'' -> Either DesugarError (Term ImpP')
+desugarExtensions t =
+  let extensionLib = getExtensionLibrary t
+      removedDecls = removeCExtDecl'' t
+  in case (extensionLib, removedDecls) of
+       (Left e, _) -> Left $ RemoveCExtE e
+       (_, Left e) -> Left $ RemoveCExtE [e]
+       (Right lib, Right t') ->
+         case expand lib t' of
+           Left e -> Left $ ExpandE e
+           Right t'' -> Right t''
