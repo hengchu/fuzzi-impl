@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -Wno-missing-signatures #-}
+{-# OPTIONS_GHC -Wno-missing-signatures -Wno-orphans #-}
 
 module SyntaxExt where
 
@@ -16,6 +16,18 @@ import Data.Comp.Derive
 import Data.Comp.Variables
 
 type Var = String
+
+data Tau = TInt
+         | TFloat
+         | TBool
+         | TAny
+         | TArr Tau (Maybe Int)
+         | TBag Tau
+         deriving (Show, Eq)
+
+data Decl = Decl Position Var Float Tau
+  deriving (Show, Eq)
+
 
 data Binop = LT | LE | GT | GE | AND | OR | EQ | NEQ | PLUS | MINUS | MULT | DIV
   deriving (Show, Eq, Ord, Enum, Bounded)
@@ -200,6 +212,11 @@ type ImpTCP' =   ExtVar E :&: Position
 $(derive [makeTraversable, makeFoldable, makeEqF, makeShowF,
           smartConstructors, smartAConstructors]
          [''Cmd, ''CExt, ''CExtDecl, ''CTCHint])
+
+data Prog = Prog {
+  prog_decls :: [Decl]
+  , prog_cmd :: Term ImpP''
+  } deriving (Show, Eq)
 
 data SyntaxSort = Expression | Command
   deriving (Show, Eq, Ord)
@@ -447,3 +464,6 @@ instance VerifyNoCExt (ExtVar s :&: Position) where
 
 instance VerifyNoCExt (CExt :&: Position) where
   verifyNoCExt (CExt name _ :&: p) = throwError $ UnexpandedCExt p name
+
+instance (EqF f, Eq a) => EqF (f :&: a) where
+  eqF (f1 :&: a1) (f2 :&: a2) = eqF f1 f2 && a1 == a2

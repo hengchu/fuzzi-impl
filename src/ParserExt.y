@@ -11,7 +11,8 @@ import Control.Monad.Except
 import Control.Monad.State.Strict
 
 import LexerExt
-import SyntaxExt
+import SyntaxExt hiding (Tau(..))
+import qualified SyntaxExt as S (Tau(..))
 import Data.Comp
 import Data.Comp.Annotation
 import Data.Map (fromList)
@@ -22,6 +23,7 @@ import Prelude hiding (LT, GT, EQ)
 
 %name      parseCmd  Cmd
 %name      parseExpr Expr
+%name      parseProg Prog
 %tokentype { Token }
 %error     { parseError }
 %monad     { Parser } { (>>=) } { return }
@@ -73,6 +75,7 @@ import Prelude hiding (LT, GT, EQ)
   cmd       { TCmdAnn _ }
   expr      { TExprAnn _ }
   extension { TExt _ }
+  types     { TTypes _ }
 
 %right ';'
 %nonassoc '='
@@ -87,6 +90,49 @@ import Prelude hiding (LT, GT, EQ)
 %nonassoc ATOM
 
 %%
+
+Ty
+: ident
+{% do
+    v <- getIdent $1
+    case v of
+      "int" -> return S.TInt
+      "float" -> return S.TFloat
+      "bool" -> return S.TBool
+      x -> failWithMsg $ "Unknown type: " ++ show x
+}
+| '[' Ty '(' int ')' ']'
+{% do
+    len <- getInt $4
+    return $ S.TArr $2 (Just len)
+}
+| '[' Ty ']'
+{ S.TArr $2 Nothing }
+| '{' Ty '}'
+{ S.TBag $2 }
+
+Decl
+: ident ':' Ty
+{% do
+    v <- getIdent $1
+    return $ Decl (token2Position $1) v 0.0 $3
+}
+| ident ':' '[' float ']' Ty
+{% do
+    v <- getIdent $1
+    s <- getFloat $4
+    return $ Decl (token2Position $1) v s $6
+}
+
+ManyDecls
+: Decl ';'
+{ [$1] }
+| Decl ';' ManyDecls
+{ $1 : $3 }
+
+Prog
+: types ManyDecls end Cmd
+{ Prog $2 $4 }
 
 Cmd :: { Term ImpP'' }
 : ident ':' cmd

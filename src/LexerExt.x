@@ -76,6 +76,7 @@ tokens :-
 <0>"cmd"                         { tokAct $ \p _ -> TCmdAnn p }
 <0>"expr"                        { tokAct $ \p _ -> TExprAnn p }
 <0>"extension"                   { tokAct $ \p _ -> TExt p }
+<0>"types"                       { tokAct $ \p _ -> TTypes p }
 <0>@identifier                   { ident }
 <0>@float                        { float }
 <0>@number                       { int }
@@ -134,6 +135,7 @@ data Token = TIdent     AlexPosn String
            | TCmdAnn    AlexPosn
            | TExprAnn   AlexPosn
            | TExt       AlexPosn
+           | TTypes     AlexPosn
            | TEOF       AlexPosn
   deriving (Generic, Show, Eq)
 
