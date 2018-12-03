@@ -216,5 +216,5 @@ shapeImpTCP :: forall e m.
                ( MonadReader ShapeCxt m
                , MonadError  e        m
                , Inj         e        ShapeCheckError
-               ) => Term ImpTCP -> m ()
-shapeImpTCP c = (cataM shapeCheck c) >> return ()
+               ) => AlgM m ImpTCP ShapeInfo
+shapeImpTCP = shapeCheck
