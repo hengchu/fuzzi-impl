@@ -89,6 +89,9 @@ deriving instance Eq      (ExtVar s a)
 deriving instance Ord     (ExtVar s a)
 deriving instance Show    AnyExtVar
 
+instance (EqF f, Eq a) => EqF (f :&: a) where
+  eqF (f1 :&: a1) (f2 :&: a2) = eqF f1 f2 && a1 == a2
+
 data Lit e = LInt Int
            | LFloat Float
            | LBool Bool
@@ -464,6 +467,3 @@ instance VerifyNoCExt (ExtVar s :&: Position) where
 
 instance VerifyNoCExt (CExt :&: Position) where
   verifyNoCExt (CExt name _ :&: p) = throwError $ UnexpandedCExt p name
-
-instance (EqF f, Eq a) => EqF (f :&: a) where
-  eqF (f1 :&: a1) (f2 :&: a2) = eqF f1 f2 && a1 == a2
