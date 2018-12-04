@@ -2,6 +2,7 @@
 
 module SyntaxExt where
 
+import Control.Lens
 import Control.Monad
 import Control.Monad.State.Strict
 import Control.Monad.Except
@@ -21,9 +22,11 @@ data Tau = TInt
          | TFloat
          | TBool
          | TAny
-         | TArr Tau (Maybe Int)
-         | TBag Tau
+         | TArr { _tau_ty :: Tau, _tau_fixed_length :: (Maybe Int) }
+         | TBag { _tau_ty :: Tau }
          deriving (Show, Eq)
+
+makeLensesWith underscoreFields ''Tau
 
 data Decl = Decl Position Var Float Tau
   deriving (Show, Eq)

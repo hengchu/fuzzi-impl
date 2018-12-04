@@ -35,13 +35,14 @@ throwErrorInj = throwError . inj
 data ShapeInfo = ShapeInfo {
   _shapeinfo_is_var     :: Maybe Var
   , _shapeinfo_is_index :: Maybe Var -- the indexed variable
+  , _shapeinfo_is_length :: Maybe Var -- the variable of the length expr
   , _shapeinfo_is_expr  :: Maybe Tau
   } deriving (Show, Eq)
 
 $(makeLensesWith underscoreFields ''ShapeInfo)
 
 defaultInfo :: ShapeInfo
-defaultInfo = ShapeInfo Nothing Nothing Nothing
+defaultInfo = ShapeInfo Nothing Nothing Nothing Nothing
 
 class ShapeCheck f where
   shapeCheck :: forall e m.
@@ -59,11 +60,16 @@ instance ShapeCheck (Expr :&: Position) where
       Nothing -> throwErrorInj $ UnknownVariable p v
       Just t -> return $ defaultInfo & is_var  .~ Just v
                                      & is_expr .~ Just t
-  shapeCheck (ELength ((view is_expr) -> Just t) :&: p) =
-    case t of
-      TArr _ _ -> return $ defaultInfo & is_expr .~ (Just TInt)
-      TBag _   -> return $ defaultInfo & is_expr .~ (Just TInt)
-      _        -> throwErrorInj $ ExpectArr p t
+  shapeCheck (ELength info :&: p) =
+    case (info ^. is_expr, info ^. is_var) of
+      (Just (TArr _ _), Just x) -> return $ defaultInfo & is_expr .~ (Just TInt)
+                                                        & is_length .~ (Just x)
+      (Just (TArr _ _), _)      -> return $ defaultInfo & is_expr .~ (Just TInt)
+      (Just (TBag _), Just x)   -> return $ defaultInfo & is_expr .~ (Just TInt)
+                                                        & is_length .~ (Just x)
+      (Just (TBag _), _)        -> return $ defaultInfo & is_expr .~ (Just TInt)
+      (Just t, _)               -> throwErrorInj $ ExpectArr p t
+      _                         -> throwErrorInj $ ExpectExpr p
   shapeCheck (ELit (LInt _) :&: _) =
     return $ defaultInfo & is_expr .~ (Just TInt)
   shapeCheck (ELit (LFloat _) :&: _) =
