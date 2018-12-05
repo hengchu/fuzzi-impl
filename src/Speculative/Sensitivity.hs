@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wno-orphans #-}
+
 module Speculative.Sensitivity where
 
 import Control.Monad.Reader
@@ -85,9 +87,24 @@ smin (Just s) _        = Just s
 smin _        (Just s) = Just s
 smin _        _        = Nothing
 
+scxtMax :: SensCxt -> SensCxt -> SensCxt
+scxtMax (SensCxt c1) (SensCxt c2) =
+  SensCxt
+  $ M.foldrWithKey
+    (\k s1 acc ->
+       case c2 ^. (at k) of
+         Just s2 -> M.insert k (max s1 s2) acc
+         _       -> M.delete k acc)
+    M.empty
+    c1
+
 data SpecSensCheckError = UnknownVariable Position Var
                         | MayNotCoterminate Position
+                        | OutOfBoundsIndex Position
                         | InternalError Position String
+                        | CannotReleaseInfSensData Position
+                        | CannotBranchOnSensData Position
+                        | CannotEstablishInvariant Position
   deriving (Show, Eq)
 
 defaultInfo :: (Monad m) => SpecSensInfo (StateT SensCxt m)
@@ -379,158 +396,195 @@ instance SpecSensCheck (Cmd :&: Position) where
                              & shape_info .~ shapeInfo
 
       -- length(x) = e
-      {-
-
       Just (APLength x) -> callCC $ \ret -> do
         shapeCxt <- getShapeCxt <$> ask
 
-        -- this case has special refinement
-        -- length(x) = length(e)
-        let specialLengthCase sensyAct = do
-              sensy <- sensyAct
+        -- length(x) = length(y), this case requires special refinement
+        let refinement syAct = do
               case M.lookup x shapeCxt of
-                Just (TArr _ _) ->
-                  case sensy of
-                    Nothing -> do
-                      let assignEff = do
-                            cxt <- get
-                            let cxt' = M.update (const Nothing) x (getSensCxt cxt)
-                            put $ SensCxt $ cxt'
+                Just (TArr _ _) -> do
+                  let assignEff = do
+                        sensy <- syAct
+                        case sensy of
+                          Nothing -> do
+                            cxt <- getSensCxt <$> get
+                            put $ SensCxt $ M.update (const Nothing) x cxt
                             return (0, 0)
-                      ret $ defaultInfo & shape_info .~ shapeInfo
-                                        & is_cmd     .~ assignEff
-                    Just _ ->
-                      -- no need to update sensitivity, just return
-                      ret $ defaultInfo & shape_info .~ shapeInfo
+                          Just _ ->
+                            return (0, 0)
+                  ret $ defaultInfo & shape_info .~ shapeInfo
+                                    & is_cmd .~ assignEff
                 Just (TBag _) -> do
                   let assignEff = do
-                        cxt <- get
-                        let cxt' = M.update (const Nothing) x (getSensCxt cxt)
-                        put $ SensCxt $ cxt'
+                        cxt <- getSensCxt <$> get
+                        put $ SensCxt $ M.update (const Nothing) x cxt
                         return (0, 0)
                   ret $ defaultInfo & shape_info .~ shapeInfo
-                                    & is_cmd     .~ assignEff
-                -- fallthrough
+                                    & is_cmd .~ assignEff
                 _ -> return ()
 
-        -- length(x) = length(e)
         case rhs ^. assign_pat of
-          Just (APLength  y    ) -> specialLengthCase (get >>= \cxt -> return $ M.lookup y (getSensCxt cxt))
-          Just (APLength2 einfo) -> specialLengthCase (einfo ^. is_expr)
-          _ -> return ()
-
-        -- length(x) = e
-        case M.lookup x shapeCxt of
-          Just (TArr _ _) -> do
-            rs <- evalStateT (rhs ^. is_expr) cxt
-            case rs of
-              Just 0 ->
-                -- no update required
-                ret $ defaultInfo & shape_info .~ shapeInfo
-              _ -> throwErrorInj $ MayNotCoterminate p
-          Just (TBag _) -> do
-            rs <- evalStateT (rhs ^. is_expr) cxt
-            case rs of
-              Just 0 -> do
-                let assignEff = do
-                      let cxt' = M.update (const Nothing) x (getSensCxt cxt)
-                      put $ SensCxt $ cxt'
-                      return (0, 0)
-                ret $ defaultInfo & shape_info .~ shapeInfo
-                                  & is_cmd .~ assignEff
-              _ -> throwErrorInj $ MayNotCoterminate p
+          Just (APLength y)       -> refinement (get >>= \cxt -> return $ M.lookup y (getSensCxt cxt))
+          Just (APLength2 reinfo) -> refinement (reinfo ^. is_expr)
           -- fallthrough
           _ -> return ()
 
-        -- anything that reached here must be bad
-        throwErrorInj $ InternalError p "bug: shape checker didn't rule out bad length assignment"
+        case M.lookup x shapeCxt of
+          Just (TArr _ _) -> do
+            let assignEff = do
+                  rs <- rhs ^. is_expr
+                  case rs of
+                    Just 0 -> return (0, 0)
+                    _ -> throwErrorInj $ MayNotCoterminate p
+            ret $ defaultInfo & shape_info .~ shapeInfo
+                              & is_cmd .~ assignEff
+          Just (TBag _) -> do
+            let assignEff = do
+                  rs <- rhs ^. is_expr
+                  case rs of
+                    Just 0 -> do
+                      cxt <- getSensCxt <$> get
+                      put $ SensCxt $ M.update (const Nothing) x cxt
+                      return (0, 0)
+                    _ -> throwErrorInj $ MayNotCoterminate p
+            ret $ defaultInfo & shape_info .~ shapeInfo
+                              & is_cmd .~ assignEff
+          _ -> return ()
 
+        throwErrorInj $ InternalError p "bug: shape checker didn't catch bad length assignment"
 
-
-      -- x[i] = e
       Just (APIndex x idxInfo) -> callCC $ \ret -> do
         shapeCxt <- getShapeCxt <$> ask
 
-        -- this case has special refinement
-        -- x[k] = e
+        -- x[k] = e, refinement
         case idxInfo ^. is_literal of
           Just (VInt k) -> do
             case M.lookup x shapeCxt of
               Just (TArr _ (Just len))
                 | 0 <= k && k < len -> do
-                    let sx = M.lookup x (getSensCxt cxt)
                     let assignEff = do
+                          cxt <- getSensCxt <$> get
+                          let sx = M.lookup x cxt
                           rs <- rhs ^. is_expr
-                          let cxt' =
-                                M.update
-                                  (const $ (+) <$> sx <*> rs)
-                                  x
-                                  (getSensCxt cxt)
-                          put $ SensCxt cxt'
+                          let sx' = (+) <$> sx <*> rs
+                          put $ SensCxt $ M.update (const sx') x cxt
                           return (0, 0)
                     ret $ defaultInfo & shape_info .~ shapeInfo
                                       & is_cmd .~ assignEff
+                | otherwise -> throwErrorInj $ OutOfBoundsIndex p
               -- fallthrough
               _ -> return ()
           -- fallthrough
           _ -> return ()
 
-        sidx <- evalStateT (idxInfo ^. is_expr) cxt
-        case (M.lookup x shapeCxt, sidx) of
-          (Just (TArr _ _), Just 0) -> do
-            let sx = M.lookup x (getSensCxt cxt)
-            case sx of
-              Just _ -> do
-                let assignEff = do
-                      rs <- rhs ^. is_expr
-                      let cxt' = M.update (const $ (+) <$> sx <*> rs) x (getSensCxt cxt)
-                      put $ SensCxt $ cxt'
+        case M.lookup x shapeCxt of
+          Just (TArr _ _) -> do
+            let assignEff = do
+                  sidx <- idxInfo ^. is_expr
+                  cxt <- getSensCxt <$> get
+                  let sx = M.lookup x cxt
+                  case (sx, sidx) of
+                    (Just _, Just 0) -> do
+                      let sx' = (+) <$> sx <*> sidx
+                      put $ SensCxt $ M.update (const sx') x cxt
                       return (0, 0)
-                ret $ defaultInfo & shape_info .~ shapeInfo
-                                  & is_cmd     .~ assignEff
-              Nothing ->
-                throwErrorInj $ MayNotCoterminate p
-          (Just (TBag _), Just 0) -> do
-            let sx = M.lookup x (getSensCxt cxt)
-            case sx of
-              Just 0 -> do
-                let assignEff = do
-                      let cxt' = M.update (const $ Just 2) x (getSensCxt cxt)
-                      put $ SensCxt $ cxt'
+                    _ -> throwErrorInj $ MayNotCoterminate p
+            ret $ defaultInfo & shape_info .~ shapeInfo
+                              & is_cmd .~ assignEff
+          Just (TBag _) -> do
+            let assignEff = do
+                  sidx <- idxInfo ^. is_expr
+                  cxt <- getSensCxt <$> get
+                  let sx = M.lookup x cxt
+                  case (sx, sidx) of
+                    (Just 0, Just 0) -> do
+                      put $ SensCxt $ M.insert x 2 cxt
                       return (0, 0)
-                ret $ defaultInfo & shape_info .~ shapeInfo
-                                  & is_cmd .~ assignEff
-              _ -> throwErrorInj $ MayNotCoterminate p
+                    _ -> throwErrorInj $ MayNotCoterminate p
+            ret $ defaultInfo & shape_info .~ shapeInfo
+                              & is_cmd .~ assignEff
           _ -> return ()
-        throwErrorInj $ InternalError p "bug: shape checker didn't rule out bad index assignment"
-      _ -> throwErrorInj $ InternalError p "bug: bad assignment pattern"
 
-{-
+        throwErrorInj $ InternalError p "bug: shape checker didn't rule out bad index assignment"
+
+      _ -> throwErrorInj $ InternalError p "bug: bad assignment pattern"
 
   specSensCheck c@(CLaplace lhs w rhs :&: p) = do
     shapeInfo <- projShapeCheck c
 
     case lhs ^. assign_pat of
-      Just (APVar x) -> undefined
-
+      Just (APVar x) -> do
+        let assignEff = do
+              cxt <- getSensCxt <$> get
+              put $ SensCxt $ M.insert x 0 cxt
+              rs <- rhs ^. is_expr
+              case rs of
+                Just s -> return (s / w, 0)
+                Nothing -> throwErrorInj $ CannotReleaseInfSensData p
+        return $ defaultInfo & shape_info .~ shapeInfo
+                             & is_cmd .~ assignEff
       _ -> throwErrorInj $ InternalError p "bug: shape checker didn't rule out bad laplace"
 
+  specSensCheck c@(CIf e c1 c2 :&: p) = do
+    shapeInfo <- projShapeCheck c
+
+    let eff = do
+          es <- e ^. is_expr
+          case es of
+            Just 0 -> do
+              -- save the current state
+              currSt <- get
+
+              -- run the first branch
+              (eps1, delt1) <- c1 ^. is_cmd
+              st1 <- get
+
+              -- run the second branch in a clean state
+              put currSt
+              (eps2, delt2) <- c2 ^. is_cmd
+              st2 <- get
+
+              put $ scxtMax st1 st2
+
+              return (max eps1 eps2, max delt1 delt2)
+            _ -> throwErrorInj $ CannotBranchOnSensData p
+
     return $ defaultInfo & shape_info .~ shapeInfo
+                         & is_cmd .~ eff
 
+  specSensCheck c@(CWhile e body :&: p) = do
+    shapeInfo <- projShapeCheck c
 
--}
+    let eff = do
+          es <- e ^. is_expr
+          case es of
+            Just 0 -> do
+              currSt <- get
+              (eps, delt) <- body ^. is_cmd
+              st <- get
+
+              case (eps, delt, currSt == st) of
+                (0, 0, True) -> return (0, 0)
+                _ -> throwErrorInj $ CannotEstablishInvariant p
+            _ -> throwErrorInj $ CannotBranchOnSensData p
+
+    return $ defaultInfo & shape_info .~ shapeInfo
+                         & is_cmd .~ eff
+
+  specSensCheck c@(CSeq c1 c2 :&: _) = do
+    shapeInfo <- projShapeCheck c
+    let eff = do
+          (eps1, delt1) <- c1 ^. is_cmd
+          (eps2, delt2) <- c2 ^. is_cmd
+          return (eps1 + eps2, delt1 + delt2)
+    return $ defaultInfo & shape_info .~ shapeInfo
+                         & is_cmd .~ eff
+
+  specSensCheck c@(CSkip :&: _) = do
+    shapeInfo <- projShapeCheck c
+    return $ defaultInfo & shape_info .~ shapeInfo
+                         & is_cmd .~ (return (0, 0))
 
 instance SpecSensCheck (CTCHint :&: Position) where
-
-
-  {-
-specSensCheckImpTCP :: ( Traversable f
-                       , MonadError e m
-                       , Inj e SpecSensCheckError
-                       , Inj e S.ShapeCheckError) => SensCxt -> Term f -> m (Eps, Delta)
-specSensCheckImpTCP cxt t = (flip runReaderT (ShapeCxt M.empty)) $ (flip runContT return) $ do
-  sensInfo <- cataM (specSensCheck cxt) t
-  evalStateT (sensInfo ^. is_cmd) cxt
--}
-
--}
+  specSensCheck (CTCHint extName params body :&: p) =
+    throwErrorInj $ InternalError p "Not yet implemented"
