@@ -219,6 +219,7 @@ instance ShapeCheck (Cmd :&: Position) where
         Just _ -> throwM $ UnsupportedAssign p
         Nothing -> throwM $ UnsupportedAssign p
 
+    -- TODO: really we should check whether rt is compat with lt
     case lt == rt of
       True ->  return $ defaultCInfo & term .~ (iACAssign p (linfo ^. term) (rinfo ^. term))
       False -> throwM $ Mismatch p [lt, rt]
