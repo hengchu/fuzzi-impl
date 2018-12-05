@@ -79,8 +79,7 @@ library
       Paths_fuzzi_impl
   default-language: Haskell2010
   default-extensions:
-                     AllowAmbiguousTypes
-                   , DataKinds
+                     DataKinds
                    , DeriveGeneric
                    , DuplicateRecordFields
                    , FlexibleContexts

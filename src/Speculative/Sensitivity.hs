@@ -1,5 +1,3 @@
-{-# OPTIONS_GHC -Wno-orphans #-}
-
 module Speculative.Sensitivity where
 
 import Control.Monad.Reader
@@ -50,12 +48,12 @@ isVBag _ = Nothing
 type Eps   = Float
 type Delta = Float
 
-newtype SensCxt = SensCxt { getSensCxt :: (M.Map Var Float, Eps, Delta) }
+newtype SensCxt = SensCxt { getSensCxt :: M.Map Var Float }
   deriving (Show, Eq)
 
 data SpecSensInfo m = SpecSensInfo {
   _specsensinfo_is_expr      :: m (Maybe Float)
-  , _specsensinfo_is_cmd     :: m (SensCxt, Eps, Delta)
+  , _specsensinfo_is_cmd     :: m (Eps, Delta)
   , _specsensinfo_is_literal :: Maybe Value
   , _specsensinfo_shape_info :: ShapeInfo
   , _specsensinfo_assign_pat :: Maybe (AssignPat m)
@@ -92,10 +90,10 @@ data SpecSensCheckError = UnknownVariable Position Var
                         | InternalError Position String
   deriving (Show, Eq)
 
-defaultInfo :: forall m. (MonadState SensCxt m) => SpecSensInfo m
+defaultInfo :: (Monad m) => SpecSensInfo (StateT SensCxt m)
 defaultInfo = SpecSensInfo
                 (return Nothing)
-                (get >>= \s -> return (s, 0, 0))
+                (return (0, 0))
                 Nothing
                 S.defaultInfo
                 Nothing
@@ -107,13 +105,11 @@ instance MonadError e m => MonadError e (ContT a m) where
   catchError = error "catchError: cannot be used in a ContT stack"
 
 projShapeCheck :: ( MonadError e m
-                  , Inj e SpecSensCheckError
                   , Inj e S.ShapeCheckError
                   , MonadReader ShapeCxt m
-                  , MonadCont m
                   , Functor f
                   , ShapeCheck f)
-               => f (SpecSensInfo m) -> m ShapeInfo
+               => f (SpecSensInfo (StateT s m)) -> m ShapeInfo
 projShapeCheck fa = shapeCheck $ fmap (view shape_info) fa
 
 class SpecSensCheck f where
@@ -121,23 +117,19 @@ class SpecSensCheck f where
                    , Inj e SpecSensCheckError
                    , Inj e S.ShapeCheckError
                    , MonadReader ShapeCxt m
-                   , MonadState  SensCxt m
                    , MonadCont m)
-                => AlgM m f (SpecSensInfo m)
+                => AlgM m f (SpecSensInfo (StateT SensCxt m))
 
 instance (SpecSensCheck f1, SpecSensCheck f2)
   => SpecSensCheck (f1 :+: f2) where
   specSensCheck = caseF (specSensCheck) (specSensCheck)
-
 
 instance SpecSensCheck (Expr :&: Position) where
   specSensCheck c@(EVar v :&: _) = do
     shapeInfo <- projShapeCheck c
     let info = defaultInfo & shape_info .~ shapeInfo
                            & assign_pat .~ Just (APVar v)
-    let eAct = do
-          cxt <- (view _1. getSensCxt) <$> get
-          return $ M.lookup v cxt
+    let eAct = do { cxt <- get; return $ M.lookup v (getSensCxt cxt) }
     return $ info & is_expr .~ eAct
 
   specSensCheck c@(ELength info :&: p) = do
@@ -186,6 +178,7 @@ instance SpecSensCheck (Expr :&: Position) where
         _ -> throwErrorInj $ InternalError p "bug: shape checker didn't rule out bad length expression"
 
     return info'
+
 
   specSensCheck c@(ELit (LInt v) :&: _) = do
     shapeInfo <- projShapeCheck c
@@ -368,70 +361,94 @@ instance SpecSensCheck (Expr :&: Position) where
                          & shape_info .~ shapeInfo
 
 
-{-
 
 instance SpecSensCheck (Cmd :&: Position) where
-  specSensCheck c@(CAssign lhs rhs :&: p) = callCC $ \ret -> do
+  specSensCheck c@(CAssign lhs rhs :&: p) = do
     shapeInfo <- projShapeCheck c
 
     case lhs ^. assign_pat of
       -- x = e
       Just (APVar x) -> do
-        cxt <- getSensCxt <$> get
-        let cxt' = M.update (const $ rhs ^. expr_sens) x (cxt ^. _1)
-        put $ SensCxt $ cxt & _1 .~ cxt'
-        ret $ defaultInfo & shape_info .~ shapeInfo
+        let assignEff = do
+              cxt <- getSensCxt <$> get
+              rs <- rhs ^. is_expr
+              let cxt' = M.update (const rs) x cxt
+              put $ SensCxt $ cxt'
+              return (0, 0)
+        return $ defaultInfo & is_cmd .~ assignEff
+                             & shape_info .~ shapeInfo
 
       -- length(x) = e
-      Just (APLength x) -> do
-        cxt <- getSensCxt <$> get
+      {-
+
+      Just (APLength x) -> callCC $ \ret -> do
         shapeCxt <- getShapeCxt <$> ask
 
         -- this case has special refinement
         -- length(x) = length(e)
-        let specialLengthCase sensy =
+        let specialLengthCase sensyAct = do
+              sensy <- sensyAct
               case M.lookup x shapeCxt of
                 Just (TArr _ _) ->
                   case sensy of
                     Nothing -> do
-                      let cxt' = M.update (const Nothing) x (cxt ^. _1)
-                      put $ SensCxt $ cxt & _1 .~ cxt'
+                      let assignEff = do
+                            cxt <- get
+                            let cxt' = M.update (const Nothing) x (getSensCxt cxt)
+                            put $ SensCxt $ cxt'
+                            return (0, 0)
                       ret $ defaultInfo & shape_info .~ shapeInfo
+                                        & is_cmd     .~ assignEff
                     Just _ ->
                       -- no need to update sensitivity, just return
                       ret $ defaultInfo & shape_info .~ shapeInfo
                 Just (TBag _) -> do
-                  let cxt' = M.update (const Nothing) x (cxt ^. _1)
-                  put $ SensCxt $ cxt & _1 .~ cxt'
+                  let assignEff = do
+                        cxt <- get
+                        let cxt' = M.update (const Nothing) x (getSensCxt cxt)
+                        put $ SensCxt $ cxt'
+                        return (0, 0)
                   ret $ defaultInfo & shape_info .~ shapeInfo
+                                    & is_cmd     .~ assignEff
                 -- fallthrough
                 _ -> return ()
 
+        -- length(x) = length(e)
         case rhs ^. assign_pat of
-          Just (APLength  y    ) -> specialLengthCase (M.lookup y (cxt ^. _1))
-          Just (APLength2 einfo) -> specialLengthCase (einfo ^. expr_sens)
+          Just (APLength  y    ) -> specialLengthCase (get >>= \cxt -> return $ M.lookup y (getSensCxt cxt))
+          Just (APLength2 einfo) -> specialLengthCase (einfo ^. is_expr)
           _ -> return ()
 
         -- length(x) = e
         case M.lookup x shapeCxt of
-          Just (TArr _ _) ->
-            case rhs ^. expr_sens of
+          Just (TArr _ _) -> do
+            rs <- evalStateT (rhs ^. is_expr) cxt
+            case rs of
               Just 0 ->
                 -- no update required
                 ret $ defaultInfo & shape_info .~ shapeInfo
               _ -> throwErrorInj $ MayNotCoterminate p
-          Just (TBag _) ->
-            case rhs ^. expr_sens of
+          Just (TBag _) -> do
+            rs <- evalStateT (rhs ^. is_expr) cxt
+            case rs of
               Just 0 -> do
-                let cxt' = M.update (const Nothing) x (cxt ^. _1)
-                put $ SensCxt $ cxt & _1 .~ cxt'
+                let assignEff = do
+                      let cxt' = M.update (const Nothing) x (getSensCxt cxt)
+                      put $ SensCxt $ cxt'
+                      return (0, 0)
                 ret $ defaultInfo & shape_info .~ shapeInfo
+                                  & is_cmd .~ assignEff
               _ -> throwErrorInj $ MayNotCoterminate p
+          -- fallthrough
           _ -> return ()
 
+        -- anything that reached here must be bad
+        throwErrorInj $ InternalError p "bug: shape checker didn't rule out bad length assignment"
+
+
+
       -- x[i] = e
-      Just (APIndex x idxInfo) -> do
-        cxt <- getSensCxt <$> get
+      Just (APIndex x idxInfo) -> callCC $ \ret -> do
         shapeCxt <- getShapeCxt <$> ask
 
         -- this case has special refinement
@@ -441,42 +458,54 @@ instance SpecSensCheck (Cmd :&: Position) where
             case M.lookup x shapeCxt of
               Just (TArr _ (Just len))
                 | 0 <= k && k < len -> do
-                    let sx = M.lookup x (cxt ^. _1)
-                    let cxt' =
-                          M.update
-                            (const $ (+) <$> sx <*> rhs ^. expr_sens)
-                            x
-                            (cxt ^. _1)
-                    put $ SensCxt $ cxt & _1 .~ cxt'
+                    let sx = M.lookup x (getSensCxt cxt)
+                    let assignEff = do
+                          rs <- rhs ^. is_expr
+                          let cxt' =
+                                M.update
+                                  (const $ (+) <$> sx <*> rs)
+                                  x
+                                  (getSensCxt cxt)
+                          put $ SensCxt cxt'
+                          return (0, 0)
                     ret $ defaultInfo & shape_info .~ shapeInfo
+                                      & is_cmd .~ assignEff
               -- fallthrough
               _ -> return ()
           -- fallthrough
           _ -> return ()
 
-        case (M.lookup x shapeCxt, idxInfo ^. expr_sens) of
+        sidx <- evalStateT (idxInfo ^. is_expr) cxt
+        case (M.lookup x shapeCxt, sidx) of
           (Just (TArr _ _), Just 0) -> do
-            let sx = M.lookup x (cxt ^. _1)
+            let sx = M.lookup x (getSensCxt cxt)
             case sx of
               Just _ -> do
-                let cxt' = M.update (const $ (+) <$> sx <*> rhs ^. expr_sens) x (cxt ^. _1)
-                put $ SensCxt $ cxt & _1 .~ cxt'
+                let assignEff = do
+                      rs <- rhs ^. is_expr
+                      let cxt' = M.update (const $ (+) <$> sx <*> rs) x (getSensCxt cxt)
+                      put $ SensCxt $ cxt'
+                      return (0, 0)
                 ret $ defaultInfo & shape_info .~ shapeInfo
+                                  & is_cmd     .~ assignEff
               Nothing ->
                 throwErrorInj $ MayNotCoterminate p
           (Just (TBag _), Just 0) -> do
-            let sx = M.lookup x (cxt ^. _1)
+            let sx = M.lookup x (getSensCxt cxt)
             case sx of
               Just 0 -> do
-                let cxt' = M.update (const $ Just 2) x (cxt ^. _1)
-                put $ SensCxt $ cxt & _1 .~ cxt'
+                let assignEff = do
+                      let cxt' = M.update (const $ Just 2) x (getSensCxt cxt)
+                      put $ SensCxt $ cxt'
+                      return (0, 0)
                 ret $ defaultInfo & shape_info .~ shapeInfo
+                                  & is_cmd .~ assignEff
               _ -> throwErrorInj $ MayNotCoterminate p
           _ -> return ()
+        throwErrorInj $ InternalError p "bug: shape checker didn't rule out bad index assignment"
+      _ -> throwErrorInj $ InternalError p "bug: bad assignment pattern"
 
-      _ -> return ()
-
-    throwErrorInj $ InternalError p "bug: shape checker didn't rule out bad assignment"
+{-
 
   specSensCheck c@(CLaplace lhs w rhs :&: p) = do
     shapeInfo <- projShapeCheck c
@@ -488,6 +517,20 @@ instance SpecSensCheck (Cmd :&: Position) where
 
     return $ defaultInfo & shape_info .~ shapeInfo
 
+
+-}
+
 instance SpecSensCheck (CTCHint :&: Position) where
+
+
+  {-
+specSensCheckImpTCP :: ( Traversable f
+                       , MonadError e m
+                       , Inj e SpecSensCheckError
+                       , Inj e S.ShapeCheckError) => SensCxt -> Term f -> m (Eps, Delta)
+specSensCheckImpTCP cxt t = (flip runReaderT (ShapeCxt M.empty)) $ (flip runContT return) $ do
+  sensInfo <- cataM (specSensCheck cxt) t
+  evalStateT (sensInfo ^. is_cmd) cxt
+-}
 
 -}
