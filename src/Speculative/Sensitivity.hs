@@ -377,8 +377,6 @@ instance SpecSensCheck (Expr :&: Position) where
     return $ defaultInfo & is_expr .~ (approx <$> (linfo ^. is_expr) <*> (rinfo ^. is_expr))
                          & shape_info .~ shapeInfo
 
-
-
 instance SpecSensCheck (Cmd :&: Position) where
   specSensCheck c@(CAssign lhs rhs :&: p) = do
     shapeInfo <- projShapeCheck c
@@ -550,7 +548,7 @@ instance SpecSensCheck (Cmd :&: Position) where
             _ -> throwErrorInj $ CannotBranchOnSensData p
 
     return $ defaultInfo & shape_info .~ shapeInfo
-                         & is_cmd .~ eff
+                         & is_cmd     .~ eff
 
   specSensCheck c@(CWhile e body :&: p) = do
     shapeInfo <- projShapeCheck c
@@ -569,7 +567,7 @@ instance SpecSensCheck (Cmd :&: Position) where
             _ -> throwErrorInj $ CannotBranchOnSensData p
 
     return $ defaultInfo & shape_info .~ shapeInfo
-                         & is_cmd .~ eff
+                         & is_cmd     .~ eff
 
   specSensCheck c@(CSeq c1 c2 :&: _) = do
     shapeInfo <- projShapeCheck c
@@ -588,3 +586,23 @@ instance SpecSensCheck (Cmd :&: Position) where
 instance SpecSensCheck (CTCHint :&: Position) where
   specSensCheck (CTCHint extName params body :&: p) =
     throwErrorInj $ InternalError p "Not yet implemented"
+
+data TCError = ShapeE S.ShapeCheckError
+             | SensE  SpecSensCheckError
+             deriving (Show, Eq)
+
+instance Inj TCError S.ShapeCheckError where
+  inj = ShapeE
+
+instance Inj TCError SpecSensCheckError where
+  inj = SensE
+
+runSpecSensCheck :: ShapeCxt
+                 -> SensCxt
+                 -> Term ImpTCP
+                 -> Either TCError (SensCxt, Eps, Delta)
+runSpecSensCheck shapeCxt sensCxt term = run $ do
+  check <- cataM specSensCheck term
+  ((eps, delt), sensCxt') <- runStateT (check ^. is_cmd) sensCxt
+  return (sensCxt', eps, delt)
+  where run = (flip runReader shapeCxt) . runExceptT . (flip runContT return)
