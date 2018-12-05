@@ -1,9 +1,8 @@
-{-# OPTIONS_GHC -Wno-orphans #-}
-
 module Speculative.Sensitivity where
 
+import Type.Reflection
+import Control.Monad.Catch
 import Control.Monad.Reader
-import Control.Monad.Except
 import Control.Monad.Cont
 import Control.Monad.State
 
@@ -105,7 +104,9 @@ data SpecSensCheckError = UnknownVariable Position Var
                         | CannotReleaseInfSensData Position
                         | CannotBranchOnSensData Position
                         | CannotEstablishInvariant Position
-  deriving (Show, Eq)
+  deriving (Show, Eq, Typeable)
+
+instance Exception SpecSensCheckError
 
 defaultInfo :: (Monad m) => SpecSensInfo (StateT SensCxt m)
 defaultInfo = SpecSensInfo
@@ -115,14 +116,7 @@ defaultInfo = SpecSensInfo
                 S.defaultInfo
                 Nothing
 
--- We really should use MonadThrow instead of MonadExcept, but that's left for
--- refactor
-instance MonadError e m => MonadError e (ContT a m) where
-  throwError = lift . throwError
-  catchError = error "catchError: cannot be used in a ContT stack"
-
-projShapeCheck :: ( MonadError e m
-                  , Inj e S.ShapeCheckError
+projShapeCheck :: ( MonadThrow m
                   , MonadReader ShapeCxt m
                   , Functor f
                   , ShapeCheck f)
@@ -130,9 +124,7 @@ projShapeCheck :: ( MonadError e m
 projShapeCheck fa = shapeCheck $ fmap (view shape_info) fa
 
 class SpecSensCheck f where
-  specSensCheck :: ( MonadError e m
-                   , Inj e SpecSensCheckError
-                   , Inj e S.ShapeCheckError
+  specSensCheck :: ( MonadThrow m
                    , MonadReader ShapeCxt m
                    , MonadCont m)
                 => AlgM m f (SpecSensInfo (StateT SensCxt m))
@@ -174,7 +166,7 @@ instance SpecSensCheck (Expr :&: Position) where
                                         & is_literal .~ Just (VInt len)
                                         & shape_info .~ shapeInfo
                                         & assign_pat .~ assignPat
-          _ -> throwErrorInj $ InternalError p "bug: impossible case, lens told us it will be a Just"
+          _ -> throwM $ InternalError p "bug: impossible case, lens told us it will be a Just"
 
       -- if not constant length array, then just check sensitivity of the inner
       -- bag/array
@@ -192,7 +184,7 @@ instance SpecSensCheck (Expr :&: Position) where
           return $ defaultInfo & is_expr    .~ arrSens
                                & shape_info .~ shapeInfo
                                & assign_pat .~ assignPat
-        _ -> throwErrorInj $ InternalError p "bug: shape checker didn't rule out bad length expression"
+        _ -> throwM $ InternalError p "bug: shape checker didn't rule out bad length expression"
 
     return info'
 
@@ -224,7 +216,7 @@ instance SpecSensCheck (Expr :&: Position) where
           ret $ defaultInfo & is_expr    .~ return (Just 0)
                             & is_literal .~ Just (VArray vals)
                             & shape_info .~ shapeInfo
-        _ -> throwErrorInj $ InternalError p "bug: lens told us it's all Just"
+        _ -> throwM $ InternalError p "bug: lens told us it's all Just"
 
     -- otherwise, add up the sensitivity of each entry
     let litArrSens = do
@@ -242,7 +234,7 @@ instance SpecSensCheck (Expr :&: Position) where
           ret $ defaultInfo & is_expr    .~ return (Just 0)
                             & is_literal .~ Just (VBag vals)
                             & shape_info .~ shapeInfo
-        _ -> throwErrorInj $ InternalError p "bug: lens told us it's all Just"
+        _ -> throwM $ InternalError p "bug: lens told us it's all Just"
 
     -- otherwise, each sensitive entry may contribute 2 bag sensitivity
     let litBagSens = do
@@ -329,13 +321,13 @@ instance SpecSensCheck (Expr :&: Position) where
                 (Just (TArr _ _), s@(Just _)) ->
                   return s
                 (Just (TArr _ _), Nothing) ->
-                  throwErrorInj $ MayNotCoterminate p
+                  throwM $ MayNotCoterminate p
                 (Just (TBag _), Just 0) ->
                   return Nothing
                 (Just (TBag _), _) ->
-                  throwErrorInj $ MayNotCoterminate p
-                _ -> throwErrorInj $ InternalError p "bug: indexing neither bag nor array"
-            _ -> throwErrorInj $ MayNotCoterminate p
+                  throwM $ MayNotCoterminate p
+                _ -> throwM $ InternalError p "bug: indexing neither bag nor array"
+            _ -> throwM $ MayNotCoterminate p
     return $ defaultInfo & is_expr .~ eindexSens
                          & shape_info .~ shapeInfo
 
@@ -363,7 +355,7 @@ instance SpecSensCheck (Expr :&: Position) where
       LFloat k ->
         return $ defaultInfo & is_expr .~ (smin <$> (info ^. is_expr) <*> (return . Just $ 2 * k))
                              & shape_info .~ shapeInfo
-      _ -> throwErrorInj $ InternalError p "bug: shape checker should've caught this"
+      _ -> throwM $ InternalError p "bug: shape checker should've caught this"
 
 
   specSensCheck c@(EScale scalarInfo vecInfo :&: _) = do
@@ -433,7 +425,7 @@ instance SpecSensCheck (Cmd :&: Position) where
                   rs <- rhs ^. is_expr
                   case rs of
                     Just 0 -> return (0, 0)
-                    _ -> throwErrorInj $ MayNotCoterminate p
+                    _ -> throwM $ MayNotCoterminate p
             ret $ defaultInfo & shape_info .~ shapeInfo
                               & is_cmd .~ assignEff
           Just (TBag _) -> do
@@ -444,12 +436,12 @@ instance SpecSensCheck (Cmd :&: Position) where
                       cxt <- getSensCxt <$> get
                       put $ SensCxt $ M.update (const Nothing) x cxt
                       return (0, 0)
-                    _ -> throwErrorInj $ MayNotCoterminate p
+                    _ -> throwM $ MayNotCoterminate p
             ret $ defaultInfo & shape_info .~ shapeInfo
                               & is_cmd .~ assignEff
           _ -> return ()
 
-        throwErrorInj $ InternalError p "bug: shape checker didn't catch bad length assignment"
+        throwM $ InternalError p "bug: shape checker didn't catch bad length assignment"
 
       Just (APIndex x idxInfo) -> callCC $ \ret -> do
         shapeCxt <- getShapeCxt <$> ask
@@ -469,7 +461,7 @@ instance SpecSensCheck (Cmd :&: Position) where
                           return (0, 0)
                     ret $ defaultInfo & shape_info .~ shapeInfo
                                       & is_cmd .~ assignEff
-                | otherwise -> throwErrorInj $ OutOfBoundsIndex p
+                | otherwise -> throwM $ OutOfBoundsIndex p
               -- fallthrough
               _ -> return ()
           -- fallthrough
@@ -486,7 +478,7 @@ instance SpecSensCheck (Cmd :&: Position) where
                       let sx' = (+) <$> sx <*> sidx
                       put $ SensCxt $ M.update (const sx') x cxt
                       return (0, 0)
-                    _ -> throwErrorInj $ MayNotCoterminate p
+                    _ -> throwM $ MayNotCoterminate p
             ret $ defaultInfo & shape_info .~ shapeInfo
                               & is_cmd .~ assignEff
           Just (TBag _) -> do
@@ -498,14 +490,14 @@ instance SpecSensCheck (Cmd :&: Position) where
                     (Just 0, Just 0) -> do
                       put $ SensCxt $ M.insert x 2 cxt
                       return (0, 0)
-                    _ -> throwErrorInj $ MayNotCoterminate p
+                    _ -> throwM $ MayNotCoterminate p
             ret $ defaultInfo & shape_info .~ shapeInfo
                               & is_cmd .~ assignEff
           _ -> return ()
 
-        throwErrorInj $ InternalError p "bug: shape checker didn't rule out bad index assignment"
+        throwM $ InternalError p "bug: shape checker didn't rule out bad index assignment"
 
-      _ -> throwErrorInj $ InternalError p "bug: bad assignment pattern"
+      _ -> throwM $ InternalError p "bug: bad assignment pattern"
 
   specSensCheck c@(CLaplace lhs w rhs :&: p) = do
     shapeInfo <- projShapeCheck c
@@ -518,10 +510,10 @@ instance SpecSensCheck (Cmd :&: Position) where
               rs <- rhs ^. is_expr
               case rs of
                 Just s -> return (s / w, 0)
-                Nothing -> throwErrorInj $ CannotReleaseInfSensData p
+                Nothing -> throwM $ CannotReleaseInfSensData p
         return $ defaultInfo & shape_info .~ shapeInfo
                              & is_cmd .~ assignEff
-      _ -> throwErrorInj $ InternalError p "bug: shape checker didn't rule out bad laplace"
+      _ -> throwM $ InternalError p "bug: shape checker didn't rule out bad laplace"
 
   specSensCheck c@(CIf e c1 c2 :&: p) = do
     shapeInfo <- projShapeCheck c
@@ -545,7 +537,7 @@ instance SpecSensCheck (Cmd :&: Position) where
               put $ scxtMax st1 st2
 
               return (max eps1 eps2, max delt1 delt2)
-            _ -> throwErrorInj $ CannotBranchOnSensData p
+            _ -> throwM $ CannotBranchOnSensData p
 
     return $ defaultInfo & shape_info .~ shapeInfo
                          & is_cmd     .~ eff
@@ -563,8 +555,8 @@ instance SpecSensCheck (Cmd :&: Position) where
 
               case (eps, delt, currSt == st) of
                 (0, 0, True) -> return (0, 0)
-                _ -> throwErrorInj $ CannotEstablishInvariant p
-            _ -> throwErrorInj $ CannotBranchOnSensData p
+                _ -> throwM $ CannotEstablishInvariant p
+            _ -> throwM $ CannotBranchOnSensData p
 
     return $ defaultInfo & shape_info .~ shapeInfo
                          & is_cmd     .~ eff
@@ -585,24 +577,14 @@ instance SpecSensCheck (Cmd :&: Position) where
 
 instance SpecSensCheck (CTCHint :&: Position) where
   specSensCheck (CTCHint extName params body :&: p) =
-    throwErrorInj $ InternalError p "Not yet implemented"
-
-data TCError = ShapeE S.ShapeCheckError
-             | SensE  SpecSensCheckError
-             deriving (Show, Eq)
-
-instance Inj TCError S.ShapeCheckError where
-  inj = ShapeE
-
-instance Inj TCError SpecSensCheckError where
-  inj = SensE
+    throwM $ InternalError p "Not yet implemented"
 
 runSpecSensCheck :: ShapeCxt
                  -> SensCxt
                  -> Term ImpTCP
-                 -> Either TCError (SensCxt, Eps, Delta)
+                 -> Either SomeException (SensCxt, Eps, Delta)
 runSpecSensCheck shapeCxt sensCxt term = run $ do
   check <- cataM specSensCheck term
   ((eps, delt), sensCxt') <- runStateT (check ^. is_cmd) sensCxt
   return (sensCxt', eps, delt)
-  where run = (flip runReader shapeCxt) . runExceptT . (flip runContT return)
+  where run = (flip runContT return) . (flip runReaderT shapeCxt)

@@ -53,6 +53,7 @@ library
               , generic-random
               , compdata
               , constraints
+              , exceptions
   exposed-modules:
                 --   Lib
                 -- , Syntax
@@ -72,6 +73,8 @@ library
                 , SyntaxExt
                 , Algebra
                 , Shape
+                , Affine
+                , Termination
                 , Speculative.Sensitivity
   build-tools:
       alex, happy

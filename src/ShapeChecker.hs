@@ -7,6 +7,7 @@ import Control.Lens ((^.), at)
 import Syntax
 import qualified Data.Map as M
 
+import Control.Monad.Catch
 import Control.Monad.Reader
 import Control.Monad.Except
 
