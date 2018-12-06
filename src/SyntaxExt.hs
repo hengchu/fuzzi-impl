@@ -26,7 +26,7 @@ data Tau = TInt
          | TBag { _tau_ty :: Tau }
          deriving (Show, Eq)
 
-makeLensesWith underscoreFields ''Tau
+$(makeLensesWith underscoreFields ''Tau)
 
 data Decl = Decl Position Var Float Tau
   deriving (Show, Eq)
@@ -470,3 +470,21 @@ instance VerifyNoCExt (ExtVar s :&: Position) where
 
 instance VerifyNoCExt (CExt :&: Position) where
   verifyNoCExt (CExt name _ :&: p) = throwError $ UnexpandedCExt p name
+
+projectEVar :: Term ImpTCP -> Maybe Var
+projectEVar t =
+  case project @ExprP t of
+    Just (EVar x :&: _) -> Just x
+    _ -> Nothing
+
+projectELInt :: Term ImpTCP -> Maybe Int
+projectELInt t =
+  case project @ExprP t of
+    Just (ELit (LInt v) :&: _) -> Just v
+    _ -> Nothing
+
+projectELength :: Term ImpTCP -> Maybe (Term ImpTCP)
+projectELength t =
+  case project @ExprP t of
+    Just (ELength e :&: _) -> Just e
+    _ -> Nothing

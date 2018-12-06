@@ -1,17 +1,16 @@
 module Main where
 
-{-
+
 import Data.List
 
 import qualified Text.Tabular as TT
 import qualified Text.Tabular.AsciiArt as TTA
 import qualified Data.Map as M
-import Syntax
-import ShapeChecker
-import SensitivityChecker
-import Python
-import Expand
-import qualified Parser as P
+import SyntaxExt
+import Shape
+import Speculative.Sensitivity
+import Composed
+import qualified ParserExt as P
 import System.IO
 import System.Exit
 import System.Environment
@@ -75,6 +74,7 @@ options =
 startOptions :: Options
 startOptions = Options SensitivityCheck "stdin" "-" "" 100
 
+{-
 renderContext :: Float -> SContext -> String
 renderContext eps (SContext sctx) =
   let epsRow = TT.row "epsilon" [show eps]
@@ -86,6 +86,7 @@ renderContext eps (SContext sctx) =
          (TT.empty TT.^..^ TT.col "value" []
           TT.+====+ epsRow)
          sctx)
+-}
 
 main :: IO ()
 main = do
@@ -112,15 +113,31 @@ main = do
 
   inputContent <- hGetContents inputFd
 
-  ast <-
+  ast@(Prog _ cmd) <-
     case P.parse P.parseProg inputContent of
       Left err -> do
         hPutStrLn stderr err
         exitFailure
       Right ast -> return ast
 
-  let ast' = ast{getCmd = desugarFix (getCmd ast) fuzziExpansionRules}
+  let shapeCxt = extractShapeCxt ast
+  let sensCxt = extractSensCxt ast
 
+  cmd' <-
+    case desugarExtensions cmd of
+      Left err -> do
+        hPutStrLn stderr $ show err
+        exitFailure
+      Right cmd' -> return cmd'
+
+  case runComposedChecker shapeCxt sensCxt cmd' of
+    Left err -> do
+      hPutStrLn stderr $ show err
+      exitFailure
+    Right r@(cxt, eps, delta) -> do
+      hPutStrLn stdout $ show r
+      exitSuccess
+  {-
   case optMode opts of
     ShapeCheckOnly -> do
       case runShapeChecker ast' of
@@ -147,5 +164,3 @@ main = do
           hPutStrLn outputFd $ render pythonCode
           exitSuccess
 -}
-
-main = return ()

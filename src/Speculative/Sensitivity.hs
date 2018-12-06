@@ -377,23 +377,6 @@ instance SpecSensCheck (Expr :&: Position) where
       _ -> throwM $ InternalError p "bug: shape checker let through bad dot expr"
 
 
-projectEVar :: Term ImpTCP -> Maybe Var
-projectEVar t =
-  case project @ExprP t of
-    Just (EVar x :&: _) -> Just x
-    _ -> Nothing
-
-projectELInt :: Term ImpTCP -> Maybe Int
-projectELInt t =
-  case project @ExprP t of
-    Just (ELit (LInt v) :&: _) -> Just v
-    _ -> Nothing
-
-projectELength :: Term ImpTCP -> Maybe (Term ImpTCP)
-projectELength t =
-  case project @ExprP t of
-    Just (ELength e :&: _) -> Just e
-    _ -> Nothing
 
 instance SpecSensCheck (Cmd :&: Position) where
   specSensCheck c@(CAssign lhs rhs :&: p) = do
@@ -552,3 +535,8 @@ runSpecSensCheck shapeCxt sensCxt term = run $ do
       return (sensCxt', eps, delt)
     _ -> throwM $ S.ExpectCmd p
   where run = (flip runContT return) . (flip runReaderT shapeCxt)
+
+extractSensCxt :: Prog -> SensCxt
+extractSensCxt (Prog decls _) =
+  SensCxt $ M.fromList (map extract decls)
+  where extract (Decl _ x s _) = (x, s)

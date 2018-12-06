@@ -10,6 +10,7 @@ import Data.Comp.Derive
 import SyntaxExt
 import qualified Data.Map as M
 
+import Debug.Trace
 import Control.Monad.Cont
 import Control.Monad.Catch
 import Control.Monad.Reader
@@ -236,7 +237,7 @@ instance ShapeCheck (Cmd :&: Position) where
     case (lt, rt) of
       (TFloat, TFloat) ->
         return $ defaultCInfo & term .~ (iACLaplace p (linfo ^. term) w (rinfo ^. term))
-      _ -> throwM $ UnsupportedAssign p
+      _ -> throwM $ ExpectTau p TFloat lt
 
 
   shapeCheck (CIf einfo@(preview tau -> Just et) cinfo1 cinfo2 :&: p) = do
@@ -266,10 +267,7 @@ instance ShapeCheck (CTCHint :&: Position) where
   shapeCheck (CTCHint name params info :&: p) =
     return $ defaultCInfo & term .~ (iACTCHint p name (params ^.. traverse . term) (info ^. term))
 
-{-
-shapeImpTCP :: forall m.
-               ( MonadReader ShapeCxt m
-               , MonadThrow           m
-               ) => AlgM m ImpTCP ShapeInfo
-shapeImpTCP = shapeCheck
--}
+extractShapeCxt :: Prog -> ShapeCxt
+extractShapeCxt (Prog decls _) =
+  ShapeCxt $ M.fromList (map extract decls)
+  where extract (Decl _ x _ t) = (x, t)

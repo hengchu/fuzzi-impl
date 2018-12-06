@@ -1,5 +1,6 @@
 module Algebra where
 
+import Control.Lens
 import Data.Comp.Algebra
 
 -- product f-algebra given two algebras
@@ -11,6 +12,13 @@ prodM alg1 alg2 v = do
   v1 <- alg1 $ fmap fst v
   v2 <- alg2 $ fmap snd v
   return (v1, v2)
+
+prodM3 :: (Functor f, Monad m) => AlgM m f a -> AlgM m f b -> AlgM m f c -> AlgM m f (a, b, c)
+prodM3 alg1 alg2 alg3 v = do
+  v1 <- alg1 $ fmap (view _1) v
+  v2 <- alg2 $ fmap (view _2) v
+  v3 <- alg3 $ fmap (view _3) v
+  return (v1, v2, v3)
 
 -- Build a complex monadic algebra using:
 -- 1. a compose   function 'f'

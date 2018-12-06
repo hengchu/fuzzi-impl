@@ -76,6 +76,7 @@ library
                 , Affine
                 , Termination
                 , Speculative.Sensitivity
+                , Composed
   build-tools:
       alex, happy
   other-modules:

@@ -63,6 +63,7 @@ tokens :-
 <0>"clip"                        { tokAct $ \p _ -> TClip p }
 <0>"scale"                       { tokAct $ \p _ -> TScale p }
 <0>"dot"                         { tokAct $ \p _ -> TDotP p }
+<0>"fc"                          { tokAct $ \p _ -> TFCast p }
 <0>"true"                        { tokAct $ \p _ -> TTrue p }
 <0>"false"                       { tokAct $ \p _ -> TFalse p }
 <0>"if"                          { tokAct $ \p _ -> TIf p }

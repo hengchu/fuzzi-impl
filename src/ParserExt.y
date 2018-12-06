@@ -72,6 +72,7 @@ import Prelude hiding (LT, GT, EQ)
   clip      { TClip _ }
   scale     { TScale _ }
   dot       { TDotP _ }
+  fcast     { TFCast _ }
   cmd       { TCmdAnn _ }
   expr      { TExprAnn _ }
   extension { TExt _ }
@@ -309,6 +310,8 @@ Expr :: { Term ExprP' }
 { inject $ EScale $3 $5 :&: (token2Position $1) }
 | dot '(' Expr ',' Expr ')'
 { inject $ EDot $3 $5 :&: (token2Position $1) }
+| fcast '(' Expr ')'
+{ inject $ EFloat $3 :&: (token2Position $1) }
 | clip '(' Expr ',' Literal ')'
 { inject $ EClip $3 (snd $5) :&: (token2Position $1) }
 
