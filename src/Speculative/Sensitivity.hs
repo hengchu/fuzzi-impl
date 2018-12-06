@@ -301,11 +301,17 @@ instance SpecSensCheck (Expr :&: Position) where
   specSensCheck c@(EIndex linfo rinfo :&: p) = do
     shapeInfo <- projShapeCheck c
     case (linfo ^? shape_info . tau, linfo ^? sens, rinfo ^? sens) of
-      (Just (TArr _ _), Just lsens, Just rsens) -> do
+      (Just (TArr _ len), Just lsens, Just rsens) -> do
         let eSens = do
+              ls <- lsens
               rs <- rsens
-              case rs of
-                Just 0 -> lsens
+              case (ls, rs) of
+                (Just _,  Just 0) -> lsens
+                (Nothing, _) ->
+                  case (len, projectELInt (rinfo ^. shape_info . term)) of
+                    (Just len', Just k)
+                      | 0 <= k && k < len' -> return Nothing
+                    _ -> throwM $ MayNotCoterminate p
                 _ -> throwM $ MayNotCoterminate p
         return $ defaultEInfo & shape_info .~ shapeInfo
                               & sens .~ eSens
@@ -343,235 +349,191 @@ instance SpecSensCheck (Expr :&: Position) where
                                               & shape_info .~ shapeInfo
       _ -> throwM $ InternalError p "bug: shape checker let through bad log expr"
 
-{-
   specSensCheck c@(EClip info litInfo :&: p) = do
     shapeInfo <- projShapeCheck c
-    case litInfo of
-      LInt k ->
-        return $ defaultInfo & is_expr .~ (smin <$> (info ^. is_expr) <*> (return . Just $ realToFrac $ 2 * k))
-                             & shape_info .~ shapeInfo
-      LFloat k ->
-        return $ defaultInfo & is_expr .~ (smin <$> (info ^. is_expr) <*> (return . Just $ 2 * k))
-                             & shape_info .~ shapeInfo
-      _ -> throwM $ InternalError p "bug: shape checker should've caught this"
+    case (info ^? sens, litInfo) of
+      (Just lsens, LInt k) ->
+        return $ defaultEInfo & sens .~ (smin <$> lsens <*> (return . Just $ realToFrac $ 2 * k))
+                              & shape_info .~ shapeInfo
+      (Just lsens, LFloat k) ->
+        return $ defaultEInfo & sens .~ (smin <$> lsens <*> (return . Just $ 2 * k))
+                              & shape_info .~ shapeInfo
+      _ -> throwM $ InternalError p "bug: shape checker let through bad clip"
 
-
-  specSensCheck c@(EScale scalarInfo vecInfo :&: _) = do
+  specSensCheck c@(EScale scalarInfo vecInfo :&: p) = do
     shapeInfo <- projShapeCheck c
-    let sens = do { ls <- scalarInfo ^. is_expr; rs <- vecInfo ^. is_expr; return $ (*) <$> ls <*> rs }
-    return $ defaultInfo & is_expr    .~ sens
-                         & shape_info .~ shapeInfo
+    case (scalarInfo ^? sens, vecInfo ^? sens) of
+      (Just lsens, Just rsens) ->
+        return $ defaultEInfo & shape_info .~ shapeInfo
+                              & sens .~ (lsens >>= \ls -> rsens >>= \rs -> return $ (*) <$> ls <*> rs)
+      _ -> throwM $ InternalError p "bug: shape checker let through bad scale"
 
-  specSensCheck c@(EDot linfo rinfo :&: _) = do
+  specSensCheck c@(EDot linfo rinfo :&: p) = do
     shapeInfo <- projShapeCheck c
-    return $ defaultInfo & is_expr .~ (approx <$> (linfo ^. is_expr) <*> (rinfo ^. is_expr))
-                         & shape_info .~ shapeInfo
+    case (linfo ^? sens, rinfo ^? sens) of
+      (Just lsens, Just rsens) ->
+        return $ defaultEInfo & sens .~ (approx <$> lsens <*> rsens)
+                              & shape_info .~ shapeInfo
+      _ -> throwM $ InternalError p "bug: shape checker let through bad dot expr"
+
+
+projectEVar :: Term ImpTCP -> Maybe Var
+projectEVar t =
+  case project @ExprP t of
+    Just (EVar x :&: _) -> Just x
+    _ -> Nothing
+
+projectELInt :: Term ImpTCP -> Maybe Int
+projectELInt t =
+  case project @ExprP t of
+    Just (ELit (LInt v) :&: _) -> Just v
+    _ -> Nothing
+
+projectELength :: Term ImpTCP -> Maybe (Term ImpTCP)
+projectELength t =
+  case project @ExprP t of
+    Just (ELength e :&: _) -> Just e
+    _ -> Nothing
 
 instance SpecSensCheck (Cmd :&: Position) where
   specSensCheck c@(CAssign lhs rhs :&: p) = do
     shapeInfo <- projShapeCheck c
 
-    case lhs ^. assign_pat of
-      -- x = e
-      Just (APVar x) -> do
-        let assignEff = do
+    case (project @ExprP (lhs ^. shape_info . term),
+          lhs ^? sens,
+          rhs ^? sens) of
+      (Just (EVar x :&: _),
+       Just _,
+       Just rsens) -> do
+        let epsDelta = do
               cxt <- getSensCxt <$> get
-              rs <- rhs ^. is_expr
-              let cxt' = M.update (const rs) x cxt
-              put $ SensCxt $ cxt'
+              rs <- rsens
+              put $ SensCxt $ M.update (const rs) x cxt
               return (0, 0)
-        return $ defaultInfo & is_cmd .~ assignEff
-                             & shape_info .~ shapeInfo
-
-      -- length(x) = e
-      Just (APLength x) -> callCC $ \ret -> do
-        shapeCxt <- getShapeCxt <$> ask
-
-        -- length(x) = length(y), this case requires special refinement
-        let refinement syAct = do
+        return $ defaultCInfo & shape_info .~ shapeInfo
+                              & eps_delta  .~ epsDelta
+      (Just (EIndex (projectEVar -> Just x) _ :&: _),
+       Just lsens,
+       Just rsens) -> do
+        let epsDelta = do
+              shapeCxt <- getShapeCxt <$> ask
+              cxt <- getSensCxt <$> get
+              ls <- lsens
+              rs <- rsens
               case M.lookup x shapeCxt of
-                Just (TArr _ _) -> do
-                  let assignEff = do
-                        sensy <- syAct
-                        case sensy of
-                          Nothing -> do
-                            cxt <- getSensCxt <$> get
-                            put $ SensCxt $ M.update (const Nothing) x cxt
-                            return (0, 0)
-                          Just _ ->
-                            return (0, 0)
-                  ret $ defaultInfo & shape_info .~ shapeInfo
-                                    & is_cmd .~ assignEff
-                Just (TBag _) -> do
-                  let assignEff = do
-                        cxt <- getSensCxt <$> get
-                        put $ SensCxt $ M.update (const Nothing) x cxt
-                        return (0, 0)
-                  ret $ defaultInfo & shape_info .~ shapeInfo
-                                    & is_cmd .~ assignEff
-                _ -> return ()
-
-        case rhs ^. assign_pat of
-          Just (APLength y)       -> refinement (get >>= \cxt -> return $ M.lookup y (getSensCxt cxt))
-          Just (APLength2 reinfo) -> refinement (reinfo ^. is_expr)
-          -- fallthrough
-          _ -> return ()
-
-        case M.lookup x shapeCxt of
-          Just (TArr _ _) -> do
-            let assignEff = do
-                  rs <- rhs ^. is_expr
-                  case rs of
-                    Just 0 -> return (0, 0)
-                    _ -> throwM $ MayNotCoterminate p
-            ret $ defaultInfo & shape_info .~ shapeInfo
-                              & is_cmd .~ assignEff
-          Just (TBag _) -> do
-            let assignEff = do
-                  rs <- rhs ^. is_expr
-                  case rs of
-                    Just 0 -> do
-                      cxt <- getSensCxt <$> get
-                      put $ SensCxt $ M.update (const Nothing) x cxt
-                      return (0, 0)
-                    _ -> throwM $ MayNotCoterminate p
-            ret $ defaultInfo & shape_info .~ shapeInfo
-                              & is_cmd .~ assignEff
-          _ -> return ()
-
-        throwM $ InternalError p "bug: shape checker didn't catch bad length assignment"
-
-      Just (APIndex x idxInfo) -> callCC $ \ret -> do
-        shapeCxt <- getShapeCxt <$> ask
-
-        -- x[k] = e, refinement
-        case idxInfo ^. is_literal of
-          Just (VInt k) -> do
-            case M.lookup x shapeCxt of
-              Just (TArr _ (Just len))
-                | 0 <= k && k < len -> do
-                    let assignEff = do
-                          cxt <- getSensCxt <$> get
-                          let sx = M.lookup x cxt
-                          rs <- rhs ^. is_expr
-                          let sx' = (+) <$> sx <*> rs
-                          put $ SensCxt $ M.update (const sx') x cxt
-                          return (0, 0)
-                    ret $ defaultInfo & shape_info .~ shapeInfo
-                                      & is_cmd .~ assignEff
-                | otherwise -> throwM $ OutOfBoundsIndex p
-              -- fallthrough
-              _ -> return ()
-          -- fallthrough
-          _ -> return ()
-
-        case M.lookup x shapeCxt of
-          Just (TArr _ _) -> do
-            let assignEff = do
-                  sidx <- idxInfo ^. is_expr
-                  cxt <- getSensCxt <$> get
-                  let sx = M.lookup x cxt
-                  case (sx, sidx) of
-                    (Just _, Just 0) -> do
-                      let sx' = (+) <$> sx <*> sidx
-                      put $ SensCxt $ M.update (const sx') x cxt
-                      return (0, 0)
-                    _ -> throwM $ MayNotCoterminate p
-            ret $ defaultInfo & shape_info .~ shapeInfo
-                              & is_cmd .~ assignEff
-          Just (TBag _) -> do
-            let assignEff = do
-                  sidx <- idxInfo ^. is_expr
-                  cxt <- getSensCxt <$> get
-                  let sx = M.lookup x cxt
-                  case (sx, sidx) of
-                    (Just 0, Just 0) -> do
-                      put $ SensCxt $ M.insert x 2 cxt
-                      return (0, 0)
-                    _ -> throwM $ MayNotCoterminate p
-            ret $ defaultInfo & shape_info .~ shapeInfo
-                              & is_cmd .~ assignEff
-          _ -> return ()
-
-        throwM $ InternalError p "bug: shape checker didn't rule out bad index assignment"
-
-      _ -> throwM $ InternalError p "bug: bad assignment pattern"
+                Just (TArr _ _) ->
+                  put $ SensCxt $ M.update (const $ (+) <$> ls <*> rs) x cxt
+                Just (TBag _) ->
+                  put $ SensCxt $ M.update (const Nothing) x cxt
+                _ -> throwM $ InternalError p "bug: shape checker let through bad indexed assignment"
+              return (0, 0)
+        return $ defaultCInfo & shape_info .~ shapeInfo
+                              & eps_delta .~ epsDelta
+      (Just (ELength (projectEVar -> Just x) :&: _),
+       Just _,
+       Just rsens) -> do
+        let epsDelta = do
+              shapeCxt <- getShapeCxt <$> ask
+              cxt <- getSensCxt <$> get
+              rs <- rsens
+              case (M.lookup x shapeCxt, rs) of
+                (Just (TArr _ _), Just 0) -> return ()
+                (Just (TArr _ _), _)
+                  | isJust $ projectELength (rhs ^. shape_info . term) ->
+                    put $ SensCxt $ M.update (const Nothing) x cxt
+                  | otherwise -> throwM $ MayNotCoterminate p
+                (Just (TBag _),   Just 0) -> put $ SensCxt $ M.update (const Nothing) x cxt
+                (Just (TBag _),   _)
+                  | isJust $ projectELength (rhs ^. shape_info . term) ->
+                    put $ SensCxt $ M.update (const Nothing) x cxt
+                  | otherwise -> throwM $ MayNotCoterminate p
+                _ -> throwM $ InternalError p "bug: shape checker let through bad length assignment"
+              return (0, 0)
+        return $ defaultCInfo & shape_info .~ shapeInfo
+                              & eps_delta .~ epsDelta
+      _ -> throwM $ InternalError p "bug: shape checker let through bad assignment"
 
   specSensCheck c@(CLaplace lhs w rhs :&: p) = do
     shapeInfo <- projShapeCheck c
 
-    case lhs ^. assign_pat of
-      Just (APVar x) -> do
-        let assignEff = do
+    case (projectEVar (lhs ^. shape_info . term),
+          rhs ^? sens) of
+      (Just x, Just rsens) -> do
+        let epsDelta = do
+              rs <- rsens
               cxt <- getSensCxt <$> get
-              put $ SensCxt $ M.insert x 0 cxt
-              rs <- rhs ^. is_expr
               case rs of
-                Just s -> return (s / w, 0)
+                Just finiteRs -> do
+                  put $ SensCxt $ M.insert x 0 cxt
+                  return (finiteRs / w, 0)
                 Nothing -> throwM $ CannotReleaseInfSensData p
-        return $ defaultInfo & shape_info .~ shapeInfo
-                             & is_cmd .~ assignEff
-      _ -> throwM $ InternalError p "bug: shape checker didn't rule out bad laplace"
+        return $ defaultCInfo & shape_info .~ shapeInfo
+                              & eps_delta  .~ epsDelta
+      _ -> throwM $ InternalError p "bug: shape checker let through bad laplace"
 
   specSensCheck c@(CIf e c1 c2 :&: p) = do
     shapeInfo <- projShapeCheck c
 
-    let eff = do
-          es <- e ^. is_expr
-          case es of
-            Just 0 -> do
-              -- save the current state
-              currSt <- get
+    case (e ^? sens, c1 ^? eps_delta, c2 ^? eps_delta) of
+      (Just esens, Just c1ED, Just c2ED) -> do
+        let epsDelta = do
+              es <- esens
+              case es of
+                Just 0 -> do
+                  currSt <- get
 
-              -- run the first branch
-              (eps1, delt1) <- c1 ^. is_cmd
-              st1 <- get
+                  (eps1, delt1) <- c1ED
+                  st1 <- get
 
-              -- run the second branch in a clean state
-              put currSt
-              (eps2, delt2) <- c2 ^. is_cmd
-              st2 <- get
+                  put currSt
+                  (eps2, delt2) <- c2ED
+                  st2 <- get
 
-              put $ scxtMax st1 st2
+                  put $ scxtMax st1 st2
 
-              return (max eps1 eps2, max delt1 delt2)
-            _ -> throwM $ CannotBranchOnSensData p
-
-    return $ defaultInfo & shape_info .~ shapeInfo
-                         & is_cmd     .~ eff
+                  return (max eps1 eps2, max delt1 delt2)
+                _ -> throwM $ CannotBranchOnSensData p
+        return $ defaultCInfo & shape_info .~ shapeInfo
+                              & eps_delta .~ epsDelta
+      _ -> throwM $ InternalError p "bug: shape checker let through bad if command"
 
   specSensCheck c@(CWhile e body :&: p) = do
     shapeInfo <- projShapeCheck c
 
-    let eff = do
-          es <- e ^. is_expr
-          case es of
-            Just 0 -> do
-              currSt <- get
-              (eps, delt) <- body ^. is_cmd
-              st <- get
+    case (e ^? sens, body ^? eps_delta) of
+      (Just esens, Just bodyED) -> do
+        let epsDelta = do
+              es <- esens
+              case es of
+                Just 0 -> do
+                  currSt <- get
+                  (eps, delt) <- bodyED
+                  st <- get
+                  put currSt
+                  if eps == 0 && delt == 0 && st == currSt
+                  then return (0, 0)
+                  else throwM $ CannotEstablishInvariant p
+                _ -> throwM $ CannotBranchOnSensData p
+        return $ defaultCInfo & shape_info .~ shapeInfo
+                              & eps_delta .~ epsDelta
+      _ -> throwM $ InternalError p "bug: shape checker let through bad while command"
 
-              case (eps, delt, currSt == st) of
-                (0, 0, True) -> return (0, 0)
-                _ -> throwM $ CannotEstablishInvariant p
-            _ -> throwM $ CannotBranchOnSensData p
-
-    return $ defaultInfo & shape_info .~ shapeInfo
-                         & is_cmd     .~ eff
-
-  specSensCheck c@(CSeq c1 c2 :&: _) = do
+  specSensCheck c@(CSeq c1 c2 :&: p) = do
     shapeInfo <- projShapeCheck c
-    let eff = do
-          (eps1, delt1) <- c1 ^. is_cmd
-          (eps2, delt2) <- c2 ^. is_cmd
-          return (eps1 + eps2, delt1 + delt2)
-    return $ defaultInfo & shape_info .~ shapeInfo
-                         & is_cmd .~ eff
+    case (c1 ^? eps_delta, c2 ^? eps_delta) of
+      (Just c1ED, Just c2ED) -> do
+        let epsDelta = do
+              (eps1, delt1) <- c1ED
+              (eps2, delt2) <- c2ED
+              return (eps1 + eps2, delt1 + delt2)
+        return $ defaultCInfo & shape_info .~ shapeInfo
+                              & eps_delta .~ epsDelta
+      _ -> throwM $ InternalError p "bug: shape checker let through bad sequence"
 
   specSensCheck c@(CSkip :&: _) = do
     shapeInfo <- projShapeCheck c
-    return $ defaultInfo & shape_info .~ shapeInfo
-                         & is_cmd .~ (return (0, 0))
+    return $ defaultCInfo & shape_info .~ shapeInfo
+                          & eps_delta .~ (return (0, 0))
 
 instance SpecSensCheck (CTCHint :&: Position) where
   specSensCheck (CTCHint extName params body :&: p) =
@@ -582,9 +544,11 @@ runSpecSensCheck :: ShapeCxt
                  -> Term ImpTCP
                  -> Either SomeException (SensCxt, Eps, Delta)
 runSpecSensCheck shapeCxt sensCxt term = run $ do
+  let (_, p) = projectA @ImpTC @Position (unTerm term)
   check <- cataM specSensCheck term
-  ((eps, delt), sensCxt') <- runStateT (check ^. is_cmd) sensCxt
-  return (sensCxt', eps, delt)
+  case check ^? eps_delta of
+    Just cmdCheck -> do
+      ((eps, delt), sensCxt') <- runStateT cmdCheck sensCxt
+      return (sensCxt', eps, delt)
+    _ -> throwM $ S.ExpectCmd p
   where run = (flip runContT return) . (flip runReaderT shapeCxt)
-
--}
