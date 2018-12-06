@@ -11,7 +11,7 @@ import Data.Maybe
 import Control.Lens hiding (op)
 import Data.Comp
 import SyntaxExt
-import Shape hiding (defaultInfo, ShapeCheckError(..))
+import Shape hiding (defaultEInfo, defaultCInfo, ShapeCheckError(..))
 import qualified Shape as S
 
 data Value = VInt   Int
@@ -52,15 +52,18 @@ type Delta = Float
 newtype SensCxt = SensCxt { getSensCxt :: M.Map Var Float }
   deriving (Show, Eq)
 
-data SpecSensInfo m = SpecSensInfo {
-  _specsensinfo_is_expr      :: m (Maybe Float)
-  , _specsensinfo_is_cmd     :: m (Eps, Delta)
-  , _specsensinfo_is_literal :: Maybe Value
+data SpecSensInfo m =
+  ESpecSensInfo {
+  _specsensinfo_sens         :: m (Maybe Float)
   , _specsensinfo_shape_info :: ShapeInfo
-  , _specsensinfo_assign_pat :: Maybe (AssignPat m)
   }
+  | CSpecSensInfo {
+      _specsensinfo_eps_delta    :: m (Eps, Delta)
+      , _specsensinfo_shape_info :: ShapeInfo
+      }
 
 $(makeLensesWith underscoreFields ''SpecSensInfo)
+$(makePrisms ''SpecSensInfo)
 
 newtype Sens = Sens { getSens :: Maybe Float }
   deriving (Show, Eq, Ord)
@@ -108,16 +111,19 @@ data SpecSensCheckError = UnknownVariable Position Var
 
 instance Exception SpecSensCheckError
 
-defaultInfo :: (Monad m) => SpecSensInfo (StateT SensCxt m)
-defaultInfo = SpecSensInfo
-                (return Nothing)
-                (return (0, 0))
-                Nothing
-                S.defaultInfo
-                Nothing
+defaultEInfo :: (Monad m) => SpecSensInfo (StateT SensCxt m)
+defaultEInfo = ESpecSensInfo
+                 (return Nothing)
+                 S.defaultEInfo
+
+defaultCInfo :: (Monad m) => SpecSensInfo (StateT SensCxt m)
+defaultCInfo = CSpecSensInfo
+                 (return (0, 0))
+                 S.defaultCInfo
 
 projShapeCheck :: ( MonadThrow m
                   , MonadReader ShapeCxt m
+                  , MonadCont m
                   , Functor f
                   , ShapeCheck f)
                => f (SpecSensInfo (StateT s m)) -> m ShapeInfo
@@ -136,216 +142,208 @@ instance (SpecSensCheck f1, SpecSensCheck f2)
 instance SpecSensCheck (Expr :&: Position) where
   specSensCheck c@(EVar v :&: _) = do
     shapeInfo <- projShapeCheck c
-    let info = defaultInfo & shape_info .~ shapeInfo
-                           & assign_pat .~ Just (APVar v)
+    let info = defaultEInfo & shape_info .~ shapeInfo
     let eAct = do { cxt <- get; return $ M.lookup v (getSensCxt cxt) }
-    return $ info & is_expr .~ eAct
+    return $ info & sens .~ eAct
 
-  specSensCheck c@(ELength info :&: p) = do
+  specSensCheck c@(ELength innerInfo :&: p) = do
     shapeInfo <- projShapeCheck c
 
-    assignPat <-
-      case info ^. assign_pat of
-        Just (APVar x) -> return $ Just (APLength  x)
-        _              -> return $ Just (APLength2 info)
+    let info = defaultEInfo & shape_info .~ shapeInfo
 
     -- when the inner expression is a literal
     info' <- callCC $ \ret -> do
-      when (isJust $ info ^. is_literal) $ do
-        case info ^. is_literal of
-          Just (VArray arr) -> ret $ defaultInfo & is_expr    .~ return (Just 0)
-                                                 & is_literal .~ Just (VInt $ length arr)
-                                                 & shape_info .~ shapeInfo
-                                                 & assign_pat .~ assignPat
-          _ -> return ()
+      case (project @ExprP (shapeInfo ^. term)) of
+        Just (ELit (LArr _) :&: _) -> ret $ info & sens .~ (return $ Just 0)
+        Just (ELit (LBag _) :&: _) -> ret $ info & sens .~ (return $ Just 0)
+        _ -> return ()
 
-      -- if not literal, then check if it's a constant length array
-      when (isJust $ shapeInfo ^? is_expr . _Just . fixed_length . _Just) $ do
-        case shapeInfo ^? is_expr . _Just . fixed_length . _Just of
-          Just len -> ret $ defaultInfo & is_expr    .~ return (Just 0)
-                                        & is_literal .~ Just (VInt len)
-                                        & shape_info .~ shapeInfo
-                                        & assign_pat .~ assignPat
-          _ -> throwM $ InternalError p "bug: impossible case, lens told us it will be a Just"
+      -- is it a fixed-length array?
+      case (innerInfo ^? shape_info . tau . fixed_length . _Just) of
+        Just _ -> ret $ info & sens .~ (return $ Just 0)
+        _ -> return ()
 
-      -- if not constant length array, then just check sensitivity of the inner
-      -- bag/array
-      case shapeInfo ^. is_expr of
-        Just (TBag _) ->
-          return $ defaultInfo & is_expr    .~ (info ^. is_expr)
-                               & shape_info .~ shapeInfo
-                               & assign_pat .~ assignPat
-        Just (TArr _ _) -> do
-          let arrSens = do
-                s <- info ^. is_expr
-                case s of
+      -- check the inner expression's sensitivity
+      case (innerInfo ^? shape_info . tau, innerInfo ^? sens) of
+        (Just (TBag _), Just s) -> ret $ info & sens .~ s
+        (Just (TArr _ _), Just s) -> do
+          let s' = do
+                sarr <- s
+                case sarr of
                   Just _ -> return $ Just 0
-                  _      -> return Nothing
-          return $ defaultInfo & is_expr    .~ arrSens
-                               & shape_info .~ shapeInfo
-                               & assign_pat .~ assignPat
-        _ -> throwM $ InternalError p "bug: shape checker didn't rule out bad length expression"
+                  Nothing -> return Nothing
+          ret $ info & sens .~ s'
+        _ -> return ()
+
+      throwM $ InternalError p "bug: shape checker didn't rule out bad length expression"
 
     return info'
 
-
-  specSensCheck c@(ELit (LInt v) :&: _) = do
+  specSensCheck c@(ELit (LInt _) :&: _) = do
     shapeInfo <- projShapeCheck c
-    return $ defaultInfo & is_expr    .~ return (Just 0)
-                         & is_literal .~ Just (VInt v)
-                         & shape_info .~ shapeInfo
+    return $ defaultEInfo & sens .~ (return $ Just 0)
+                          & shape_info .~ shapeInfo
 
-  specSensCheck c@(ELit (LFloat v) :&: _) = do
+  specSensCheck c@(ELit (LFloat _) :&: _) = do
     shapeInfo <- projShapeCheck c
-    return $ defaultInfo & is_expr    .~ return (Just 0)
-                         & is_literal .~ Just (VFloat v)
-                         & shape_info .~ shapeInfo
+    return $ defaultEInfo & sens       .~ return (Just 0)
+                          & shape_info .~ shapeInfo
 
-  specSensCheck c@(ELit (LBool b) :&: _) = do
+  specSensCheck c@(ELit (LBool _) :&: _) = do
     shapeInfo <- projShapeCheck c
-    return $ defaultInfo & is_expr    .~ return (Just 0)
-                         & is_literal .~ Just (VBool b)
-                         & shape_info .~ shapeInfo
+    return $ defaultEInfo & sens       .~ return (Just 0)
+                          & shape_info .~ shapeInfo
+
 
   specSensCheck c@(ELit (LArr infos) :&: p) = callCC $ \ret -> do
     shapeInfo <- projShapeCheck c
+    let info = defaultEInfo & shape_info .~ shapeInfo
     -- if this is a literal array with literal contents
-    when (all isJust $ map (view is_literal) infos) $ do
-      case sequenceA $ map (view is_literal) infos of
-        Just vals ->
-          ret $ defaultInfo & is_expr    .~ return (Just 0)
-                            & is_literal .~ Just (VArray vals)
-                            & shape_info .~ shapeInfo
-        _ -> throwM $ InternalError p "bug: lens told us it's all Just"
+    when (all isJust $ map (preview sens) infos) $ do
+      case infos ^.. traverse . sens of
+        innerSens -> do
+          let eSens = do
+                sensitivities <- sequenceA innerSens
+                return $ getSens $ foldMap Sens sensitivities
+          ret $ info & sens .~ eSens
 
-    -- otherwise, add up the sensitivity of each entry
-    let litArrSens = do
-          sens <- sequenceA $ fmap (view is_expr) infos
-          return $ getSens $ foldMap Sens sens
-    return $ defaultInfo & is_expr    .~ litArrSens
-                         & shape_info .~ shapeInfo
+    throwM $ InternalError p "bug: shape checker let through bad literal array"
 
   specSensCheck c@(ELit (LBag infos) :&: p) = callCC $ \ret -> do
     shapeInfo <- projShapeCheck c
+    let info = defaultEInfo & shape_info .~ shapeInfo
     -- if this is a literal array with literal contents
-    when (all isJust $ map (view is_literal) infos) $ do
-      case sequenceA $ map (view is_literal) infos of
-        Just vals ->
-          ret $ defaultInfo & is_expr    .~ return (Just 0)
-                            & is_literal .~ Just (VBag vals)
-                            & shape_info .~ shapeInfo
-        _ -> throwM $ InternalError p "bug: lens told us it's all Just"
+    when (all isJust $ map (preview sens) infos) $ do
+      case infos ^.. traverse . sens of
+        innerSens -> do
+          let eSens = do
+                sensitivities <- sequenceA innerSens
+                return $ Just $ 2 * (fromIntegral . length . filter (> Just 0) $ sensitivities)
+          ret $ info & sens .~ eSens
 
-    -- otherwise, each sensitive entry may contribute 2 bag sensitivity
-    let litBagSens = do
-          sens <- sequenceA $ fmap (view is_expr) infos
-          return $ Just $ 2 * (fromIntegral . length . filter (> Just 0) $ sens)
-    return $ defaultInfo & is_expr .~ litBagSens
-                         & shape_info .~ shapeInfo
+    throwM $ InternalError p "bug: shape checker let through bad literal bag"
 
-  specSensCheck c@(EBinop op linfo rinfo :&: _)
+  specSensCheck c@(EBinop op linfo rinfo :&: p)
     | op == PLUS || op == MINUS = do
         shapeInfo <- projShapeCheck c
-        let sens = do
-              lsens <- linfo ^. is_expr
-              rsens <- rinfo ^. is_expr
-              return $ (+) <$> lsens <*> rsens
-        return $ defaultInfo & is_expr    .~ sens
-                             & shape_info .~ shapeInfo
+        case (linfo ^? sens, rinfo ^? sens) of
+          (Just lsens, Just rsens) -> do
+            let eSens = do
+                  ls <- lsens
+                  rs <- rsens
+                  return $ (+) <$> ls <*> rs
+            return $ defaultEInfo & sens       .~ eSens
+                                  & shape_info .~ shapeInfo
+          _ -> throwM $ InternalError p "bug: shape checker didn't rule out bad arith"
 
     | op == MULT = do
         shapeInfo <- projShapeCheck c
 
-        resultInfo <-
-          case (linfo ^. is_literal, rinfo ^. is_literal) of
-            (Just (VInt k), _) -> do
-              let sens = do
-                    s <- rinfo ^. is_expr
-                    return $ (* (fromIntegral k)) <$> s
-              return $ defaultInfo & is_expr .~ sens
-            (Just (VFloat k), _) -> do
-              let sens = do
-                    s <- rinfo ^. is_expr
-                    return $ (* k) <$> s
-              return $ defaultInfo & is_expr .~ sens
-            (_, Just (VInt k)) -> do
-              let sens = do
-                    s <- linfo ^. is_expr
-                    return $ (* (fromIntegral k)) <$> s
-              return $ defaultInfo & is_expr .~ sens
-            (_, Just (VFloat k)) -> do
-              let sens = do
-                    s <- rinfo ^. is_expr
-                    return $ (* k) <$> s
-              return $ defaultInfo & is_expr .~ sens
-            _ -> do
-              let sens = do
-                    ls <- linfo ^. is_expr
-                    rs <- rinfo ^. is_expr
-                    return $ approx ls rs
-              return $ defaultInfo & is_expr .~ sens
+        case (project @ExprP (linfo ^. shape_info . term),
+              project @ExprP (rinfo ^. shape_info . term),
+              linfo ^? sens,
+              rinfo ^? sens) of
+          (Just (ELit (LInt k) :&: _), Just _,
+           Just _, Just rsens) ->
+            return $ defaultEInfo & shape_info .~ shapeInfo
+                                  & sens .~ (rsens >>= \rs -> return $ (* fromIntegral k) <$> rs)
+          (Just (ELit (LFloat k) :&: _), Just _,
+           Just _, Just rsens) ->
+            return $ defaultEInfo & shape_info .~ shapeInfo
+                                  & sens .~ (rsens >>= \rs -> return $ (* k) <$> rs)
+          (Just _, Just (ELit (LInt k) :&: _),
+           Just lsens, Just _) ->
+            return $ defaultEInfo & shape_info .~ shapeInfo
+                                  & sens .~ (lsens >>= \ls -> return $ (* fromIntegral k) <$> ls)
+          (Just _, Just (ELit (LFloat k) :&: _),
+           Just lsens, Just _) ->
+            return $ defaultEInfo & shape_info .~ shapeInfo
+                                  & sens .~ (lsens >>= \ls -> return $ (* k) <$> ls)
+          (Just _, Just _,
+           Just lsens, Just rsens) ->
+            return $ defaultEInfo & shape_info .~ shapeInfo
+                                  & sens .~ (lsens >>= \ls -> rsens >>= \rs -> return $ (*) <$> ls <*> rs)
+          _ -> throwM $ InternalError p "bug: shape checker let through bad multiplication"
 
-        return $ resultInfo & shape_info .~ shapeInfo
     | op == DIV = do
         shapeInfo <- projShapeCheck c
 
-        result <-
-          case (rinfo ^. is_literal) of
-            Just (VInt k) -> do
-              let sens = do { s <- linfo ^. is_expr; return $ (* (fromIntegral k)) <$> s }
-              return $ defaultInfo & is_expr .~ sens
-            Just (VFloat k) -> do
-              let sens = do { s <- linfo ^. is_expr; return $ (* k) <$> s }
-              return $ defaultInfo & is_expr .~ sens
-            _ -> return $ defaultInfo & is_expr .~ (approx <$> linfo ^. is_expr <*> rinfo ^. is_expr)
-
-        return $ result & shape_info .~ shapeInfo
+        case (project @ExprP (rinfo ^. shape_info . term),
+              linfo ^? sens,
+              rinfo ^? sens) of
+          (Just (ELit (LInt k) :&: _),
+           Just lsens,
+           Just _) ->
+            return $ defaultEInfo & shape_info .~ shapeInfo
+                                  & sens .~ (lsens >>= \ls -> return $ (/ fromIntegral k) <$> ls)
+          (Just (ELit (LFloat k) :&: _),
+           Just lsens,
+           Just _) ->
+            return $ defaultEInfo & shape_info .~ shapeInfo
+                                  & sens .~ (lsens >>= \ls -> return $ (/ k) <$> ls)
+          (Just _,
+           Just lsens,
+           Just rsens) ->
+            return $ defaultEInfo & shape_info .~ shapeInfo
+                                  & sens .~ (approx <$> lsens <*> rsens)
+          _ -> throwM $ InternalError p "bug: shape checker let through bad division"
 
     | otherwise = do
         shapeInfo <- projShapeCheck c
 
-        let lsens = linfo ^. is_expr
-        let rsens = rinfo ^. is_expr
-
-        return $ defaultInfo & is_expr .~ (approx <$> lsens <*> rsens)
-                             & shape_info .~ shapeInfo
+        case (linfo ^? sens, rinfo ^? sens) of
+          (Just lsens, Just rsens) ->
+            return $ defaultEInfo & sens .~ (approx <$> lsens <*> rsens)
+                                  & shape_info .~ shapeInfo
+          _ ->
+            throwM $ InternalError p "bug: shape checker let through bad binop expr"
 
   specSensCheck c@(EIndex linfo rinfo :&: p) = do
     shapeInfo <- projShapeCheck c
-    let eindexSens = do
-          lsens <- linfo ^. is_expr
-          rsens <- rinfo ^. is_expr
-          case rsens of
-            Just 0 ->
-              case (linfo ^. shape_info . is_expr, lsens) of
-                (Just (TArr _ _), s@(Just _)) ->
-                  return s
-                (Just (TArr _ _), Nothing) ->
-                  throwM $ MayNotCoterminate p
-                (Just (TBag _), Just 0) ->
-                  return Nothing
-                (Just (TBag _), _) ->
-                  throwM $ MayNotCoterminate p
-                _ -> throwM $ InternalError p "bug: indexing neither bag nor array"
-            _ -> throwM $ MayNotCoterminate p
-    return $ defaultInfo & is_expr .~ eindexSens
-                         & shape_info .~ shapeInfo
+    case (linfo ^? shape_info . tau, linfo ^? sens, rinfo ^? sens) of
+      (Just (TArr _ _), Just lsens, Just rsens) -> do
+        let eSens = do
+              rs <- rsens
+              case rs of
+                Just 0 -> lsens
+                _ -> throwM $ MayNotCoterminate p
+        return $ defaultEInfo & shape_info .~ shapeInfo
+                              & sens .~ eSens
+      (Just (TBag _), Just lsens, Just rsens) -> do
+        let eSens = do
+              ls <- lsens
+              rs <- rsens
+              case (ls, rs) of
+                (Just 0, Just 0) -> return Nothing
+                _ -> throwM $ MayNotCoterminate p
+        return $ defaultEInfo & shape_info .~ shapeInfo
+                              & sens .~ eSens
+      _ -> throwM $ InternalError p "bug: shape checker let through bad index expr"
 
-  specSensCheck c@(EFloat info :&: _) = do
+  specSensCheck c@(EFloat info :&: p) = do
     shapeInfo <- projShapeCheck c
-    return $ defaultInfo & is_expr .~ (info ^. is_expr)
-                         & shape_info .~ shapeInfo
+    case info ^? sens of
+      Just innerSens ->
+        return $ defaultEInfo & sens .~ innerSens
+                              & shape_info .~ shapeInfo
+      _ -> throwM $ InternalError p "bug: shape checker let through bad float cast"
 
-  specSensCheck c@(EExp info :&: _) = do
+  specSensCheck c@(EExp info :&: p) = do
     shapeInfo <- projShapeCheck c
-    return $ defaultInfo & is_expr .~ (approx1 <$> info ^. is_expr)
-                         & shape_info .~ shapeInfo
+    case info ^? sens of
+      Just innerSens ->
+        return $ defaultEInfo & sens .~ (approx1 <$> innerSens)
+                              & shape_info .~ shapeInfo
+      _ -> throwM $ InternalError p "bug: shape checker let through bad exponentiation expr"
 
-  specSensCheck c@(ELog info :&: _) = do
+  specSensCheck c@(ELog info :&: p) = do
     shapeInfo <- projShapeCheck c
-    return $ defaultInfo & is_expr .~ (approx1 <$> info ^. is_expr)
-                         & shape_info .~ shapeInfo
+    case info ^? sens of
+      Just innerSens -> return $ defaultEInfo & sens .~ (approx1 <$> innerSens)
+                                              & shape_info .~ shapeInfo
+      _ -> throwM $ InternalError p "bug: shape checker let through bad log expr"
 
+{-
   specSensCheck c@(EClip info litInfo :&: p) = do
     shapeInfo <- projShapeCheck c
     case litInfo of
@@ -588,3 +586,5 @@ runSpecSensCheck shapeCxt sensCxt term = run $ do
   ((eps, delt), sensCxt') <- runStateT (check ^. is_cmd) sensCxt
   return (sensCxt', eps, delt)
   where run = (flip runContT return) . (flip runReaderT shapeCxt)
+
+-}
