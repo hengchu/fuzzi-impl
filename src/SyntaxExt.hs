@@ -483,8 +483,20 @@ projectELInt t =
     Just (ELit (LInt v) :&: _) -> Just v
     _ -> Nothing
 
+projectELFloat :: Term ImpTCP -> Maybe Float
+projectELFloat t =
+  case project @ExprP t of
+    Just (ELit (LFloat v) :&: _) -> Just v
+    _ -> Nothing
+
 projectELength :: Term ImpTCP -> Maybe (Term ImpTCP)
 projectELength t =
   case project @ExprP t of
     Just (ELength e :&: _) -> Just e
+    _ -> Nothing
+
+projectExtName :: Term ImpTCP -> Maybe String
+projectExtName t =
+  case project @(CTCHint :&: Position) t of
+    Just (CTCHint name _ _ :&: _) -> Just name
     _ -> Nothing

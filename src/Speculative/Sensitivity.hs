@@ -6,6 +6,7 @@ import Control.Monad.Reader
 import Control.Monad.Cont
 import Control.Monad.State
 
+import qualified Data.Set as S
 import qualified Data.Map as M
 import Data.Maybe
 import Control.Lens hiding (op)
@@ -13,6 +14,8 @@ import Data.Comp
 import SyntaxExt
 import Shape hiding (defaultEInfo, defaultCInfo, ShapeCheckError(..))
 import qualified Shape as S
+
+import Debug.Trace
 
 data Value = VInt   Int
            | VFloat Float
@@ -49,7 +52,9 @@ isVBag _ = Nothing
 type Eps   = Float
 type Delta = Float
 
-newtype SensCxt = SensCxt { getSensCxt :: M.Map Var Float }
+data SensCxt = SensCxt { _senscxt_sensmap :: M.Map Var Float
+                       , _senscxt_allow_branch :: Bool
+                       }
   deriving (Show, Eq)
 
 data SpecSensInfo m =
@@ -62,8 +67,12 @@ data SpecSensInfo m =
       , _specsensinfo_shape_info :: ShapeInfo
       }
 
+$(makeLensesWith underscoreFields ''SensCxt)
 $(makeLensesWith underscoreFields ''SpecSensInfo)
 $(makePrisms ''SpecSensInfo)
+
+getSensCxt :: SensCxt -> M.Map Var Float
+getSensCxt = view sensmap
 
 newtype Sens = Sens { getSens :: Maybe Float }
   deriving (Show, Eq, Ord)
@@ -89,16 +98,15 @@ smin (Just s) _        = Just s
 smin _        (Just s) = Just s
 smin _        _        = Nothing
 
-scxtMax :: SensCxt -> SensCxt -> SensCxt
-scxtMax (SensCxt c1) (SensCxt c2) =
-  SensCxt
-  $ M.foldrWithKey
+scxtMax :: M.Map Var Float -> M.Map Var Float -> M.Map Var Float
+scxtMax c1 c2 =
+  (M.foldrWithKey
     (\k s1 acc ->
        case c2 ^. (at k) of
          Just s2 -> M.insert k (max s1 s2) acc
          _       -> M.delete k acc)
     M.empty
-    c1
+    c1)
 
 data SpecSensCheckError = UnknownVariable Position Var
                         | MayNotCoterminate Position
@@ -107,6 +115,9 @@ data SpecSensCheckError = UnknownVariable Position Var
                         | CannotReleaseInfSensData Position
                         | CannotBranchOnSensData Position
                         | CannotEstablishInvariant Position
+                        | ExtraSensInput Position
+                        | ShouldNotOutputTo Position (S.Set Var)
+                        | InvalidExtensionArgs Position
   deriving (Show, Eq, Typeable)
 
 instance Exception SpecSensCheckError
@@ -246,23 +257,23 @@ instance SpecSensCheck (Expr :&: Position) where
           (Just (ELit (LInt k) :&: _), Just _,
            Just _, Just rsens) ->
             return $ defaultEInfo & shape_info .~ shapeInfo
-                                  & sens .~ (rsens >>= \rs -> return $ (* fromIntegral k) <$> rs)
+                                  & sens .~ (rsens >>= \rs -> return $ (abs . (* fromIntegral k)) <$> rs)
           (Just (ELit (LFloat k) :&: _), Just _,
            Just _, Just rsens) ->
             return $ defaultEInfo & shape_info .~ shapeInfo
-                                  & sens .~ (rsens >>= \rs -> return $ (* k) <$> rs)
+                                  & sens .~ (rsens >>= \rs -> return $ (abs . (* k)) <$> rs)
           (Just _, Just (ELit (LInt k) :&: _),
            Just lsens, Just _) ->
             return $ defaultEInfo & shape_info .~ shapeInfo
-                                  & sens .~ (lsens >>= \ls -> return $ (* fromIntegral k) <$> ls)
+                                  & sens .~ (lsens >>= \ls -> return $ (abs . (* fromIntegral k)) <$> ls)
           (Just _, Just (ELit (LFloat k) :&: _),
            Just lsens, Just _) ->
             return $ defaultEInfo & shape_info .~ shapeInfo
-                                  & sens .~ (lsens >>= \ls -> return $ (* k) <$> ls)
+                                  & sens .~ (lsens >>= \ls -> return $ (abs . (* k)) <$> ls)
           (Just _, Just _,
            Just lsens, Just rsens) ->
             return $ defaultEInfo & shape_info .~ shapeInfo
-                                  & sens .~ (lsens >>= \ls -> rsens >>= \rs -> return $ (*) <$> ls <*> rs)
+                                  & sens .~ (approx <$> lsens <*> rsens)
           _ -> throwM $ InternalError p "bug: shape checker let through bad multiplication"
 
     | op == DIV = do
@@ -389,9 +400,8 @@ instance SpecSensCheck (Cmd :&: Position) where
        Just _,
        Just rsens) -> do
         let epsDelta = do
-              cxt <- getSensCxt <$> get
               rs <- rsens
-              put $ SensCxt $ M.update (const rs) x cxt
+              sensmap %= M.alter (const rs) x
               return (0, 0)
         return $ defaultCInfo & shape_info .~ shapeInfo
                               & eps_delta  .~ epsDelta
@@ -400,14 +410,13 @@ instance SpecSensCheck (Cmd :&: Position) where
        Just rsens) -> do
         let epsDelta = do
               shapeCxt <- getShapeCxt <$> ask
-              cxt <- getSensCxt <$> get
               ls <- lsens
               rs <- rsens
               case M.lookup x shapeCxt of
                 Just (TArr _ _) ->
-                  put $ SensCxt $ M.update (const $ (+) <$> ls <*> rs) x cxt
+                  sensmap %= M.alter (const $ (+) <$> ls <*> rs) x
                 Just (TBag _) ->
-                  put $ SensCxt $ M.update (const Nothing) x cxt
+                  sensmap %= M.alter (const Nothing) x
                 _ -> throwM $ InternalError p "bug: shape checker let through bad indexed assignment"
               return (0, 0)
         return $ defaultCInfo & shape_info .~ shapeInfo
@@ -417,18 +426,17 @@ instance SpecSensCheck (Cmd :&: Position) where
        Just rsens) -> do
         let epsDelta = do
               shapeCxt <- getShapeCxt <$> ask
-              cxt <- getSensCxt <$> get
               rs <- rsens
               case (M.lookup x shapeCxt, rs) of
                 (Just (TArr _ _), Just 0) -> return ()
                 (Just (TArr _ _), _)
                   | isJust $ projectELength (rhs ^. shape_info . term) ->
-                    put $ SensCxt $ M.update (const Nothing) x cxt
+                    sensmap %= M.alter (const Nothing) x
                   | otherwise -> throwM $ MayNotCoterminate p
-                (Just (TBag _),   Just 0) -> put $ SensCxt $ M.update (const Nothing) x cxt
+                (Just (TBag _),   Just 0) -> sensmap %= M.alter (const Nothing) x
                 (Just (TBag _),   _)
                   | isJust $ projectELength (rhs ^. shape_info . term) ->
-                    put $ SensCxt $ M.update (const Nothing) x cxt
+                    sensmap %= M.alter (const Nothing) x
                   | otherwise -> throwM $ MayNotCoterminate p
                 _ -> throwM $ InternalError p "bug: shape checker let through bad length assignment"
               return (0, 0)
@@ -444,10 +452,9 @@ instance SpecSensCheck (Cmd :&: Position) where
       (Just x, Just rsens) -> do
         let epsDelta = do
               rs <- rsens
-              cxt <- getSensCxt <$> get
               case rs of
                 Just finiteRs -> do
-                  put $ SensCxt $ M.insert x 0 cxt
+                  sensmap %= M.insert x 0
                   return (finiteRs / w, 0)
                 Nothing -> throwM $ CannotReleaseInfSensData p
         return $ defaultCInfo & shape_info .~ shapeInfo
@@ -461,21 +468,38 @@ instance SpecSensCheck (Cmd :&: Position) where
       (Just esens, Just c1ED, Just c2ED) -> do
         let epsDelta = do
               es <- esens
-              case es of
-                Just 0 -> do
+              canBranch <- view allow_branch <$> get
+              case (es, canBranch) of
+                (Just 0, _) -> do
                   currSt <- get
 
                   (eps1, delt1) <- c1ED
-                  st1 <- get
+                  st1 <- getSensCxt <$> get
 
                   put currSt
                   (eps2, delt2) <- c2ED
-                  st2 <- get
+                  st2 <- getSensCxt <$> get
 
-                  put $ scxtMax st1 st2
+                  sensmap %= \_ -> scxtMax st1 st2
 
                   return (max eps1 eps2, max delt1 delt2)
-                _ -> throwM $ CannotBranchOnSensData p
+                (_, True) -> do
+                  let mvs1 = c1 ^. shape_info . mvs
+                  let mvs2 = c2 ^. shape_info . mvs
+
+                  currSt <- get
+
+                  (eps1, delt1) <- c1ED
+
+                  put currSt
+                  (eps2, delt2) <- c2ED
+
+                  put currSt
+                  sensmap %= \cxt -> S.foldr M.delete cxt (mvs1 `S.union` mvs2)
+
+                  return (max eps1 eps2, max delt1 delt2)
+                (_, False) ->
+                  throwM $ CannotBranchOnSensData p
         return $ defaultCInfo & shape_info .~ shapeInfo
                               & eps_delta .~ epsDelta
       _ -> throwM $ InternalError p "bug: shape checker let through bad if command"
@@ -518,17 +542,216 @@ instance SpecSensCheck (Cmd :&: Position) where
     return $ defaultCInfo & shape_info .~ shapeInfo
                           & eps_delta .~ (return (0, 0))
 
+-- verifies that sensitive data only flows from s to t.
+-- returns True in the fst component of the output, if any other sensitive input is used
+-- returns any other sensitive output in the snd component of the output
+verifyFlow :: (MonadState SensCxt m)
+           => Var -> Var -> S.Set Var
+           -> m (Eps, Delta)
+           -> m (Bool, S.Set Var)
+verifyFlow s t modifiedVars eff = do
+  currCxt <- getSensCxt <$> get
+
+  -- modified variables cannot depend on
+  -- their value from last iteration
+  let currCxt' = S.foldr M.delete currCxt modifiedVars
+
+  -- first, verify all outputs only depend on s
+  sensmap %= \_ -> M.insert s 0 currCxt'
+  _ <- eff
+  outCxt1 <- getSensCxt <$> get
+  let hasExtraSensInput =
+        any (/= Just 0.0) (map (flip M.lookup outCxt1) (S.toList modifiedVars))
+
+  -- second, verify only sensitive output is t
+  sensmap %= \_ -> M.delete s currCxt'
+  _ <- eff
+  outCxt2 <- getSensCxt <$> get
+  let
+    isSensitive x =
+      case M.lookup x outCxt2 of
+        Just 0 -> False
+        _ -> True
+    sensOutputs =
+      S.filter isSensitive modifiedVars
+
+  -- restore the original state
+  sensmap %= \_ -> currCxt
+
+  return $ (hasExtraSensInput, S.delete t sensOutputs)
+
 instance SpecSensCheck (CTCHint :&: Position) where
-  specSensCheck (CTCHint extName params body :&: p) =
-    throwM $ InternalError p "Not yet implemented"
+  specSensCheck c@(CTCHint "amap" [vin, vout, vtin, vidx, vtout, amapBody] body :&: p) =
+    case (projectEVar $ vin   ^. shape_info . term,
+          projectEVar $ vout  ^. shape_info . term,
+          projectEVar $ vtin  ^. shape_info . term,
+          projectEVar $ vidx  ^. shape_info . term,
+          projectEVar $ vtout ^. shape_info . term,
+          amapBody ^? _CSpecSensInfo,
+          body ^? shape_info . mvs) of
+      (Just _in,
+       Just _out,
+       Just _tin,
+       Just _idx,
+       Just _tout,
+       Just (amapBodyEff, (view mvs -> modifiedVars)),
+       Just allMvs) -> do
+        shapeInfo <- projShapeCheck c
+        let eff = do
+              (extraSensSrcs, extraSensOutputs) <- verifyFlow _tin _tout modifiedVars amapBodyEff
+              when (extraSensSrcs) $ do
+                throwM $ ExtraSensInput p
+              when (not (S.null extraSensOutputs)) $ do
+                throwM $ ShouldNotOutputTo p extraSensOutputs
+
+              currCxt <- getSensCxt <$> get
+              let sensIn = M.lookup _in currCxt
+
+              -- set the sensitivity of tin = 1, and compute sensitivity of tout
+              sensmap %= \_ -> M.insert _tin 1 currCxt
+              _ <- amapBodyEff
+              sensTout <- M.lookup _tout . getSensCxt <$> get
+
+              -- set the sensitivity of all modified variables to infinity
+              let mvsToInf = S.foldr M.delete currCxt allMvs
+              let outSens = (*) <$> sensIn <*> sensTout
+              sensmap %= \_ -> M.alter (const outSens) _out mvsToInf
+              return $ (0, 0)
+        return $ defaultCInfo & shape_info .~ shapeInfo
+                              & eps_delta .~ eff
+      _ -> throwM $ InvalidExtensionArgs p
+
+  specSensCheck c@(CTCHint "bmap" [vin, vout, vtin, vidx, vtout, bmapBody] body :&: p) =
+    case (projectEVar $ vin   ^. shape_info . term,
+          projectEVar $ vout  ^. shape_info . term,
+          projectEVar $ vtin  ^. shape_info . term,
+          projectEVar $ vidx  ^. shape_info . term,
+          projectEVar $ vtout ^. shape_info . term,
+          bmapBody ^? _CSpecSensInfo,
+          body ^? shape_info . mvs) of
+      (Just _in,
+       Just _out,
+       Just _tin,
+       Just _idx,
+       Just _tout,
+       Just (bmapBodyEff, (view mvs -> modifiedVars)),
+       Just allMvs) -> do
+        shapeInfo <- projShapeCheck c
+        let eff = do
+              allow_branch %= const True
+              (extraSensSrcs, extraSensOutputs) <- verifyFlow _tin _tout modifiedVars bmapBodyEff
+              when (extraSensSrcs) $ do
+                throwM $ ExtraSensInput p
+              when (not (S.null extraSensOutputs)) $ do
+                throwM $ ShouldNotOutputTo p extraSensOutputs
+
+              currCxt <- getSensCxt <$> get
+              let sensIn = M.lookup _in currCxt
+
+              _ <- bmapBodyEff
+
+              -- set the sensitivity of all modified variables to infinity
+              let mvsToInf = S.foldr M.delete currCxt allMvs
+              sensmap %= \_ -> M.alter (const sensIn) _out mvsToInf
+              allow_branch %= const False
+              return (0, 0)
+        return $ defaultCInfo & shape_info .~ shapeInfo
+                              & eps_delta .~ eff
+      _ -> throwM $ InvalidExtensionArgs p
+
+  specSensCheck c@(CTCHint "partition" [vin, vout, vtin,
+                                        vidx, vtout, vtidx,
+                                        voutidx, vtpart, litnparts,
+                                        idxMapBody] body :&: p) =
+    case (projectEVar $ vin ^. shape_info . term,
+          projectEVar $ vout ^. shape_info . term,
+          projectEVar $ vtin ^. shape_info . term,
+          projectEVar $ vidx ^. shape_info . term,
+          projectEVar $ vtout ^. shape_info . term,
+          projectEVar $ vtidx ^. shape_info . term,
+          projectEVar $ voutidx ^. shape_info . term,
+          projectEVar $ vtpart ^. shape_info . term,
+          projectELInt $ litnparts ^. shape_info . term,
+          idxMapBody ^? _CSpecSensInfo,
+          body ^? shape_info . mvs) of
+      (Just _in,
+       Just _out,
+       Just _tin,
+       Just _idx,
+       Just _tout,
+       Just _tidx,
+       Just _outidx,
+       Just _tpart,
+       Just _nParts,
+       Just (idxMapBodyEff, (view mvs -> modifiedVars)),
+       Just allMvs) -> do
+        shapeInfo <- projShapeCheck c
+        let eff = do
+              allow_branch %= const True
+              (extraSensSrcs, extraSensOutputs) <- verifyFlow _tin _tout modifiedVars idxMapBodyEff
+              when (extraSensSrcs) $ do
+                throwM $ ExtraSensInput p
+              when (not $ S.null extraSensOutputs) $ do
+                throwM $ ShouldNotOutputTo p extraSensOutputs
+
+              currCxt <- getSensCxt <$> get
+              let sensIn = M.lookup _in currCxt
+
+              _ <- idxMapBodyEff
+
+              let mvsToInf = S.foldr M.delete currCxt allMvs
+              sensmap %= \_ -> M.alter (const sensIn) _out mvsToInf
+              allow_branch %= const False
+              return (0, 0)
+        return $ defaultCInfo & shape_info .~ shapeInfo
+                              & eps_delta  .~ eff
+      _ -> throwM $ InvalidExtensionArgs p
+
+  specSensCheck c@(CTCHint "bsum" [vin, vout, vidx, vtin, litbound] body :&: p) =
+    case (projectEVar $ vin ^. shape_info . term,
+          projectEVar $ vout ^. shape_info . term,
+          projectEVar $ vidx ^. shape_info . term,
+          projectEVar $ vtin ^. shape_info . term,
+          projectELFloat $ litbound ^. shape_info . term,
+          body ^? shape_info . mvs) of
+      (Just _in,
+       Just _out,
+       Just _idx,
+       Just _tin,
+       Just _bound,
+       Just allMvs) -> do
+        shapeInfo <- projShapeCheck c
+
+        when (_bound < 0) $ do
+          throwM $ S.ExpectPositive p _bound
+
+        let eff = do
+              currCxt <- getSensCxt <$> get
+              let sensIn = M.lookup _in currCxt
+              let mvsToInf = S.foldr M.delete currCxt allMvs
+              sensmap %= \_ -> M.alter (const $ (* _bound) <$> sensIn) _out mvsToInf
+              return (0, 0)
+
+        return $ defaultCInfo & shape_info .~ shapeInfo
+                              & eps_delta .~ eff
+
+      _ -> throwM $ InvalidExtensionArgs p
+
+  specSensCheck c@(CTCHint _ _ body :&: p) = do
+    shapeInfo <- projShapeCheck c
+    case body ^? eps_delta of
+      Just eff ->
+        return $ defaultCInfo & shape_info .~ shapeInfo
+                              & eps_delta .~ eff
+      _ -> throwM $ S.ExpectCmd p
 
 runSpecSensCheck :: ShapeCxt
                  -> SensCxt
                  -> Term ImpTCP
                  -> Either SomeException (SensCxt, Eps, Delta)
-runSpecSensCheck shapeCxt sensCxt term = run $ do
-  let (_, p) = projectA @ImpTC @Position (unTerm term)
-  check <- cataM specSensCheck term
+runSpecSensCheck shapeCxt sensCxt c = run $ do
+  let (_, p) = projectA @ImpTC @Position (unTerm c)
+  check <- cataM specSensCheck c
   case check ^? eps_delta of
     Just cmdCheck -> do
       ((eps, delt), sensCxt') <- runStateT cmdCheck sensCxt
@@ -538,5 +761,5 @@ runSpecSensCheck shapeCxt sensCxt term = run $ do
 
 extractSensCxt :: Prog -> SensCxt
 extractSensCxt (Prog decls _) =
-  SensCxt $ M.fromList (map extract decls)
+  SensCxt (M.fromList (map extract decls)) False
   where extract (Decl _ x s _) = (x, s)

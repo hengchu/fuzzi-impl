@@ -145,5 +145,6 @@ instance TerminationCheck (Cmd :&: Position) where
     return $ TerminationInfo shapeInfo True
 
 instance TerminationCheck (CTCHint :&: Position) where
-  terminationCheck (CTCHint extName params body :&: p) =
-    throwM $ InternalError p "not yet implemented"
+  terminationCheck c@(CTCHint _ _ body :&: _) = do
+    shapeInfo <- projShapeCheck c
+    return $ TerminationInfo shapeInfo (body ^. terminates)

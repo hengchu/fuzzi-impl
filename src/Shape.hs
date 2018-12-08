@@ -9,6 +9,7 @@ import Data.Comp
 import Data.Comp.Derive
 import SyntaxExt
 import qualified Data.Map as M
+import qualified Data.Set as S
 
 import Debug.Trace
 import Control.Monad.Cont
@@ -19,7 +20,7 @@ data ShapeCheckError = ExpectTau       Position Tau Tau -- expected type, got ty
                      | ExpectArr       Position Tau     -- expected arrays/bags, got this type
                      | ExpectNum       Position Tau     -- expected numeric type, got type
                      | ExpectSmall     Position Tau     -- expected small type, got type
-                     | Mismatch        Position [Tau]   -- the mismatching types
+                     | Mismatch        Position [Tau] [Term ImpTCP]   -- the mismatching types
                      | UnknownVariable Position Var
                      | ExpectExpr      Position         -- expected expression, got something else
                      | ExpectCmd       Position         -- expected command, got something else
@@ -35,8 +36,11 @@ newtype ShapeCxt = ShapeCxt { getShapeCxt :: M.Map Var Tau }
 
 data ShapeInfo =
   EShapeInfo { _shapeinfo_term :: Term ImpTCP
-             , _shapeinfo_tau :: Tau }
-  | CShapeInfo { _shapinfo_term :: Term ImpTCP }
+             , _shapeinfo_tau :: Tau
+             }
+  | CShapeInfo { _shapinfo_term :: Term ImpTCP
+               , _shapeinfo_mvs :: S.Set Var
+               }
   deriving (Show, Eq)
 
 $(makeLensesWith underscoreFields ''ShapeInfo)
@@ -46,7 +50,7 @@ defaultEInfo :: ShapeInfo
 defaultEInfo = EShapeInfo (iAELit (Position 0 0) (LInt 0)) TAny
 
 defaultCInfo :: ShapeInfo
-defaultCInfo = CShapeInfo (iACSkip (Position 0 0))
+defaultCInfo = CShapeInfo (iACSkip (Position 0 0)) S.empty
 
 class ShapeCheck f where
   shapeCheck :: forall m.
@@ -89,7 +93,7 @@ instance ShapeCheck (Expr :&: Position) where
                return $ defaultEInfo & tau  .~ TArr t (Just (length infos))
                                      & term .~ (iAELit p (LArr $ infos ^.. traverse . term))
              | otherwise ->
-               throwM $ Mismatch p (t:ts)
+               throwM $ Mismatch p (t:ts) (infos ^.. traverse . term)
            [] -> return $ defaultEInfo & tau .~ TArr TAny (Just 0)
                                        & term .~ (iAELit p (LArr []))
     else throwM $ ExpectExpr p
@@ -101,7 +105,7 @@ instance ShapeCheck (Expr :&: Position) where
                return $ defaultEInfo & tau  .~ TBag t
                                      & term .~ (iAELit p (LBag $ infos ^.. traverse . term))
              | otherwise ->
-               throwM $ Mismatch p (t:ts)
+               throwM $ Mismatch p (t:ts) (infos ^.. traverse . term)
            [] -> return $ defaultEInfo & tau .~ TBag TAny
                                        & term .~ (iAELit p (LBag []))
     else throwM $ ExpectExpr p
@@ -116,14 +120,14 @@ instance ShapeCheck (Expr :&: Position) where
             return $ defaultEInfo & tau .~ TFloat
                                   & term .~ (iAEBinop p op (linfo ^. term) (rinfo ^. term))
           _ | t1 == t2  -> throwM $ ExpectNum p t1
-            | otherwise -> throwM $ Mismatch p [t1, t2]
+            | otherwise -> throwM $ Mismatch p [t1, t2] [linfo ^. term, rinfo ^. term]
     | op == AND || op == OR = do
         case (t1, t2) of
           (TBool, TBool) ->
             return $ defaultEInfo & tau .~ TBool
                                   & term .~ (iAEBinop p op (linfo ^. term) (rinfo ^. term))
           _ | t1 == t2   -> throwM $ ExpectTau p TBool t1
-            | otherwise  -> throwM $ Mismatch p [t1, t2]
+            | otherwise  -> throwM $ Mismatch p [t1, t2] [linfo ^. term, rinfo ^. term]
     | op == LT || op == EQ || op == GT || op == GE = do
         case (t1, t2) of
           (TInt,   TInt)   ->
@@ -133,7 +137,7 @@ instance ShapeCheck (Expr :&: Position) where
             return $ defaultEInfo & tau .~ TBool
                                   & term .~ (iAEBinop p op (linfo ^. term) (rinfo ^. term))
           _ | t1 == t2  -> throwM $ ExpectNum p t1
-            | otherwise -> throwM $ Mismatch p [t1, t2]
+            | otherwise -> throwM $ Mismatch p [t1, t2] [linfo ^. term, rinfo ^. term]
     | op == EQ || op == NEQ = do
         case (t1, t2) of
           (TInt,   TInt)   ->
@@ -146,7 +150,7 @@ instance ShapeCheck (Expr :&: Position) where
             return $ defaultEInfo & tau .~ TBool
                                   & term .~ (iAEBinop p op (linfo ^. term) (rinfo ^. term))
           _ | t1 == t2  -> throwM $ ExpectSmall p t1
-            | otherwise -> throwM $ Mismatch p [t1, t2]
+            | otherwise -> throwM $ Mismatch p [t1, t2] [linfo ^. term, rinfo ^. term]
   shapeCheck (EIndex info idxInfo@((preview tau) -> Just t2) :&: p) = do
     case (info ^? tau, t2) of
       (Just (TArr t _), TInt) ->
@@ -200,62 +204,83 @@ instance ShapeCheck (Expr :&: Position) where
       (TArr TFloat (Just len1), TArr TFloat (Just len2))
         | len1 == len2 -> return $ defaultEInfo & tau .~ TFloat
                                                 & term .~ (iAEDot p (linfo ^. term) (rinfo ^. term))
-      _ -> throwM $ Mismatch p [tv1, tv2]
+      _ -> throwM $ Mismatch p [tv1, tv2] [linfo ^. term, rinfo ^. term]
   shapeCheck (_ :&: p) =
     throwM $ ExpectExpr p
 
+-- is 'rt' more specific than 'lt'? really the only case is fixed length arrays,
+-- it should be OK to assign [int(5)] to [int], as an example.
+isTauCompat :: Tau -> Tau -> Bool
+isTauCompat lt rt =
+  case (lt, rt) of
+    (TArr _  _      , TArr TAny (Just 0)) -> True
+    (TBag _         , TBag TAny) -> True
+    (TArr t1 Nothing, TArr t2 (Just _)) -> isTauCompat t1 t2
+    (TBag t1,         TBag t2)          -> isTauCompat t1 t2
+    (_,               _)                -> lt == rt
+
 instance ShapeCheck (Cmd :&: Position) where
   shapeCheck (CAssign linfo@(preview tau -> Just lt) rinfo@(preview tau -> Just rt) :&: p) = do
-    callCC $ \good -> do
-      case project @ExprP (linfo ^. term) of
-        Just (EVar _ :&: _) -> good ()
-        Just (ELength lhs :&: _) ->
-          case project @ExprP lhs of
-            Just (EVar _ :&: _) -> good ()
-            _ -> throwM $ UnsupportedAssign p
-        Just (EIndex lhs _ :&: _) ->
-          case project @ExprP lhs of
-            Just (EVar _ :&: _) -> good ()
-            _ -> throwM $ UnsupportedAssign p
-        Just _ -> throwM $ UnsupportedAssign p
-        Nothing -> throwM $ UnsupportedAssign p
+    modifiedVars <-
+      callCC $ \good -> do
+        case project @ExprP (linfo ^. term) of
+          Just (EVar v :&: _) -> good (S.singleton v)
+          Just (ELength lhs :&: _) ->
+            case project @ExprP lhs of
+              Just (EVar v :&: _) -> good (S.singleton v)
+              _ -> throwM $ UnsupportedAssign p
+          Just (EIndex lhs _ :&: _) ->
+            case project @ExprP lhs of
+              Just (EVar v :&: _) -> good (S.singleton v)
+              _ -> throwM $ UnsupportedAssign p
+          Just _ -> throwM $ UnsupportedAssign p
+          Nothing -> throwM $ UnsupportedAssign p
 
     -- TODO: really we should check whether rt is compat with lt
-    case lt == rt of
+    case lt `isTauCompat` rt of
       True ->  return $ defaultCInfo & term .~ (iACAssign p (linfo ^. term) (rinfo ^. term))
-      False -> throwM $ Mismatch p [lt, rt]
+                                     & mvs .~ modifiedVars
+      False -> throwM $ Mismatch p [lt, rt] [linfo ^. term, rinfo ^. term]
 
   shapeCheck (CLaplace linfo@(preview tau -> Just lt) w rinfo@(preview tau -> Just rt) :&: p) = do
     when (w <= 0) $ do
       throwM $ ExpectPositive p w
 
-    callCC $ \good -> do
-      case project @ExprP (linfo ^. term) of
-        Just (EVar _ :&: _) -> good ()
-        _                   -> throwM $ UnsupportedAssign p
+    modifiedVars <-
+      callCC $ \good -> do
+        case project @ExprP (linfo ^. term) of
+          Just (EVar v :&: _) -> good (S.singleton v)
+          _                   -> throwM $ UnsupportedAssign p
 
     case (lt, rt) of
       (TFloat, TFloat) ->
         return $ defaultCInfo & term .~ (iACLaplace p (linfo ^. term) w (rinfo ^. term))
+                              & mvs .~ modifiedVars
       _ -> throwM $ ExpectTau p TFloat lt
 
 
   shapeCheck (CIf einfo@(preview tau -> Just et) cinfo1 cinfo2 :&: p) = do
     case (et, cinfo1 ^? _CShapeInfo, cinfo2 ^? _CShapeInfo) of
-      (TBool, Just c1, Just c2) -> return $ defaultCInfo & term .~ (iACIf p (einfo ^. term) c1 c2)
+      (TBool, Just (c1, mvs1), Just (c2, mvs2)) ->
+        return $ defaultCInfo & term .~ (iACIf p (einfo ^. term) c1 c2)
+                              & mvs .~ (mvs1 `S.union` mvs2)
       (_    , Just _,  Just _ ) -> throwM $ ExpectTau p TBool et
       (_    , _     ,  _      ) -> throwM $ ExpectCmd p
 
   shapeCheck (CWhile einfo@(preview tau -> Just et) cinfo :&: p) = do
     case (et, cinfo ^? _CShapeInfo) of
-      (TBool, Just body) -> return $ defaultCInfo & term .~ (iACWhile p (einfo ^. term) body)
+      (TBool, Just (body, mvsBody)) ->
+        return $ defaultCInfo & term .~ (iACWhile p (einfo ^. term) body)
+                              & mvs .~ mvsBody
       (_,     Just _)    -> throwM $ ExpectTau p TBool et
       (_,     Nothing)   -> throwM $ ExpectCmd p
 
 
   shapeCheck (CSeq cinfo1 cinfo2 :&: p) = do
     case (cinfo1 ^? _CShapeInfo, cinfo2 ^? _CShapeInfo) of
-      (Just c1, Just c2) -> return $ defaultCInfo & term .~ (iACSeq p c1 c2)
+      (Just (c1, mvs1), Just (c2, mvs2)) ->
+        return $ defaultCInfo & term .~ (iACSeq p c1 c2)
+                              & mvs .~ (mvs1 `S.union` mvs2)
       _                  -> throwM $ ExpectCmd p
 
   shapeCheck (CSkip :&: p) = return $ defaultCInfo & term .~ (iACSkip p)
@@ -265,7 +290,12 @@ instance ShapeCheck (Cmd :&: Position) where
 
 instance ShapeCheck (CTCHint :&: Position) where
   shapeCheck (CTCHint name params info :&: p) =
-    return $ defaultCInfo & term .~ (iACTCHint p name (params ^.. traverse . term) (info ^. term))
+    case info ^? mvs of
+      Just modifiedVars ->
+        return $ defaultCInfo & term .~ (iACTCHint p name (params ^.. traverse . term) (info ^. term))
+                              & mvs .~ modifiedVars
+      _ ->
+        throwM $ ExpectCmd p
 
 extractShapeCxt :: Prog -> ShapeCxt
 extractShapeCxt (Prog decls _) =

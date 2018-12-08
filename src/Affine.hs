@@ -6,7 +6,7 @@ import Data.Comp
 import Data.Comp.Derive
 import SyntaxExt
 
-import Shape hiding (ShapeCheckError(..))
+import Shape
 import Control.Monad.Reader
 import Control.Monad.Catch
 import Control.Monad.Cont
@@ -82,5 +82,10 @@ instance AffineCheck (Cmd :&: Position) where
     return $ CAffineInfo shapeInfo True
 
 instance AffineCheck (CTCHint :&: Position) where
-  affineCheck c@(CTCHint extName params body :&: p) =
-    throwM $ InternalError p "not yet implemented"
+  affineCheck c@(CTCHint _ _ body :&: p) = do
+    shapeInfo <- projShapeCheck c
+    case body ^? affine of
+      Just af ->
+        return $ CAffineInfo shapeInfo af
+      _ ->
+        throwM $ ExpectCmd p

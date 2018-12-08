@@ -220,7 +220,7 @@ IntExpr
   {% getInt $1 >>= \v -> return (token2Position $1, v)
   }
 | '-' int %prec ATOM
-  {% getInt $1 >>= \v -> return (token2Position $1, (-v))
+  {% getInt $2 >>= \v -> return (token2Position $1, (-v))
   }
 
 FloatExpr
@@ -228,7 +228,7 @@ FloatExpr
   {% getFloat $1 >>= \v -> return (token2Position $1, v)
   }
 | '-' float %prec ATOM
-  {% getFloat $1 >>= \v -> return (token2Position $1, (-v))
+  {% getFloat $2 >>= \v -> return (token2Position $1, (-v))
   }
 
 BoolExpr
@@ -399,15 +399,15 @@ token2Position tok =
 
 getIdent :: Token -> Parser String
 getIdent (TIdent _ x) = return x
-getIdent t = failWithMsg $ "Expecting an TIdent, position = " ++ show (getAlexPosn t)
+getIdent t = failWithMsg $ "Expecting a TIdent, position = " ++ show (getAlexPosn t)
 
 getInt :: Token -> Parser Int
 getInt (TInt _ v) = return v
-getInt t = failWithMsg $ "Expecting an TInt, position = " ++ show (getAlexPosn t)
+getInt t = failWithMsg $ "Expecting a TInt, position = " ++ show (getAlexPosn t)
 
 getFloat :: Token -> Parser Float
 getFloat (TFloat _ v) = return v
-getFloat t = failWithMsg $ "Expecting an TFloat, position = " ++ show (getAlexPosn t)
+getFloat t = failWithMsg $ "Expecting a TFloat, position = " ++ show (getAlexPosn t) ++ ", got = " ++ show t
 
 parse :: ([Token] -> Parser a) -> String -> Either String a
 parse p input = do
