@@ -443,17 +443,20 @@ data DesugarError = RemoveCExtE [RemoveCExtDeclError]
                   | UnexpandedCExt Position String
                   deriving (Show, Eq, Ord)
 
-desugarExtensions :: Term ImpP'' -> Either DesugarError (Term ImpTCP)
-desugarExtensions t =
+desugarExtensions' :: ExtensionLibrary -> Term ImpP'' -> Either DesugarError (Term ImpTCP)
+desugarExtensions' lib t =
   let extensionLib = getExtensionLibrary t
       removedDecls = removeCExtDecl'' t
   in case (extensionLib, removedDecls) of
        (Left e, _) -> Left $ RemoveCExtE e
        (_, Left e) -> Left $ RemoveCExtE [e]
-       (Right lib, Right t') ->
-         case expand lib t' of
+       (Right lib', Right t') ->
+         case expand (lib `M.union` lib') t' of
            Left e -> Left $ ExpandE e
            Right t'' -> runExcept $ cataM verifyNoCExt t''
+
+desugarExtensions :: Term ImpP'' -> Either DesugarError (Term ImpTCP)
+desugarExtensions t = desugarExtensions' M.empty t
 
 class VerifyNoCExt f where
   verifyNoCExt :: (MonadError DesugarError m) => AlgM m f (Term ImpTCP)

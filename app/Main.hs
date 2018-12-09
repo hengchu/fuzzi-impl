@@ -1,8 +1,12 @@
 module Main where
 
-
 import Data.List
 
+import Control.Lens
+import GHC.Generics
+import qualified Data.ByteString.Lazy.Char8 as B8 (hPutStrLn)
+import Data.Aeson hiding (Options)
+import Data.Aeson.TH hiding (Options)
 import qualified Text.Tabular as TT
 import qualified Text.Tabular.AsciiArt as TTA
 import qualified Data.Map as M
@@ -25,11 +29,20 @@ data ExecMode = ShapeCheckOnly
 
 data Options = Options {
   optMode :: ExecMode
+  , optExtFile :: String -- the path to the extension library file
   , optInputFile :: String -- use "stdin" for stdin
   , optOutputFile :: String -- use "-" for stdout
   , optDataFile :: String
   , optDepth :: Int
   } deriving (Show, Eq, Ord)
+
+data Output = Output {
+  _output_sensitivities :: M.Map Var Float
+  , _output_epsilon :: Float
+  , _output_delta :: Float
+  } deriving (Show, Eq, Ord)
+
+$(deriveJSON defaultOptions{fieldLabelModifier = drop 8} ''Output)
 
 options :: [OptDescr (Options -> IO Options)]
 options =
@@ -47,6 +60,11 @@ options =
         (\dt opt -> return $ opt{optDataFile = dt, optMode = TranspileOnly})
          "FILE")
       "JSON data file path",
+    Option "I" ["file"]
+      (ReqArg
+        (\arg opt -> return $ opt{optExtFile=arg})
+        "FILE")
+      "Extension library path",
     Option "f" ["file"]
       (ReqArg
         (\arg opt -> return $ opt{optInputFile = arg})
@@ -72,7 +90,7 @@ options =
   ]
 
 startOptions :: Options
-startOptions = Options SensitivityCheck "stdin" "-" "" 100
+startOptions = Options SensitivityCheck "" "stdin" "-" "" 100
 
 {-
 renderContext :: Float -> SContext -> String
@@ -105,13 +123,32 @@ main = do
     exitFailure
 
   let inputFile = optInputFile opts
+  {-
   let outputFile = optOutputFile opts
   let jsonPath = optDataFile opts
   let depth = optDepth opts
+  -}
 
   inputFd <- if inputFile == "stdin" then return stdin else openFile inputFile ReadMode
 
   inputContent <- hGetContents inputFd
+
+  extLib <-
+    case optExtFile opts of
+      [] -> return M.empty
+      path -> do
+        extFileFd <- openFile path ReadMode
+        extFileContent <- hGetContents extFileFd
+        case P.parse P.parseExtLib extFileContent of
+          Left err -> do
+            hPutStrLn stderr err
+            exitFailure
+          Right (Prog _ cmd) ->
+            case getExtensionLibrary cmd of
+              Left errs -> do
+                hPutStrLn stderr $ show errs
+                exitFailure
+              Right extLib -> return extLib
 
   ast@(Prog _ cmd) <-
     case P.parse P.parseProg inputContent of
@@ -124,7 +161,7 @@ main = do
   let sensCxt = extractSensCxt ast
 
   cmd' <-
-    case desugarExtensions cmd of
+    case desugarExtensions' extLib cmd of
       Left err -> do
         hPutStrLn stderr $ show err
         exitFailure
@@ -134,9 +171,11 @@ main = do
     Left err -> do
       hPutStrLn stderr $ show err
       exitFailure
-    Right r@(cxt, eps, delta) -> do
-      hPutStrLn stdout $ show r
+    Right (SensCxt cxt _, eps, delta) -> do
+      let output = Output cxt eps delta
+      B8.hPutStrLn stdout $ encode output
       exitSuccess
+
   {-
   case optMode opts of
     ShapeCheckOnly -> do

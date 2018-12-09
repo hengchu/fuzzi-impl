@@ -29,6 +29,7 @@ $(makeLensesWith underscoreFields ''ComposedInfo)
 
 data ComposedCheckInfo = MapBodyMayNotTerminate Position
                        | MapBodyIsNotAffine Position
+                       | AdvCompBodyMayNotTerminate Position
   deriving (Show, Eq, Typeable)
 
 instance Exception ComposedCheckInfo
@@ -115,12 +116,9 @@ instance ComposedCheck (CTCHint :&: Position) where
     let affineInfo' = affineInfo & affine .~ True
     let termInfo'   = termInfo   & terminates .~ True
 
-    case (bodyInfo ^. terminfo . terminates,
-          bodyInfo ^? affineinfo . affine) of
-      (True, Just True)  -> return $ ComposedInfo specsensInfo affineInfo' termInfo'
-      (False, _)         -> throwM $ MapBodyMayNotTerminate p
-      (_,    Just False) -> throwM $ MapBodyIsNotAffine p
-      _                  -> throwM $ ExpectCmd p
+    case bodyInfo ^. terminfo . terminates of
+      True  -> return $ ComposedInfo specsensInfo affineInfo' termInfo'
+      False -> throwM $ MapBodyMayNotTerminate p
 
   composedCheck c@(CTCHint "bsum" _ _ :&: _) = do
     specsensInfo <- projSensCheck c
@@ -131,6 +129,18 @@ instance ComposedCheck (CTCHint :&: Position) where
     let termInfo'   = termInfo   & terminates .~ True
 
     return $ ComposedInfo specsensInfo affineInfo' termInfo'
+
+  composedCheck c@(CTCHint "ac" [_, _, _, bodyInfo] _ :&: p) = do
+    specsensInfo <- projSensCheck c
+    affineInfo <- projAffineCheck c
+    termInfo <- projTermCheck c
+
+    let affineInfo' = affineInfo & affine .~ True
+    let termInfo'   = termInfo   & terminates .~ True
+
+    case bodyInfo ^. terminfo . terminates of
+      True -> return $ ComposedInfo specsensInfo affineInfo' termInfo'
+      False -> throwM $ AdvCompBodyMayNotTerminate p
 
   composedCheck c = do
     specsensInfo <- projSensCheck c

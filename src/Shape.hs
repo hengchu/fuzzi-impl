@@ -128,7 +128,7 @@ instance ShapeCheck (Expr :&: Position) where
                                   & term .~ (iAEBinop p op (linfo ^. term) (rinfo ^. term))
           _ | t1 == t2   -> throwM $ ExpectTau p TBool t1
             | otherwise  -> throwM $ Mismatch p [t1, t2] [linfo ^. term, rinfo ^. term]
-    | op == LT || op == EQ || op == GT || op == GE = do
+    | op == LE || op == LT || op == EQ || op == GT || op == GE = do
         case (t1, t2) of
           (TInt,   TInt)   ->
             return $ defaultEInfo & tau .~ TBool
@@ -205,7 +205,7 @@ instance ShapeCheck (Expr :&: Position) where
         | len1 == len2 -> return $ defaultEInfo & tau .~ TFloat
                                                 & term .~ (iAEDot p (linfo ^. term) (rinfo ^. term))
       _ -> throwM $ Mismatch p [tv1, tv2] [linfo ^. term, rinfo ^. term]
-  shapeCheck (_ :&: p) =
+  shapeCheck (t :&: p) =
     throwM $ ExpectExpr p
 
 -- is 'rt' more specific than 'lt'? really the only case is fixed length arrays,
@@ -285,7 +285,7 @@ instance ShapeCheck (Cmd :&: Position) where
 
   shapeCheck (CSkip :&: p) = return $ defaultCInfo & term .~ (iACSkip p)
 
-  shapeCheck (_ :&: p) = throwM $ ExpectExpr p
+  shapeCheck (t :&: p) = throwM $ ExpectExpr p
 
 
 instance ShapeCheck (CTCHint :&: Position) where

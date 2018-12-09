@@ -580,6 +580,23 @@ verifyFlow s t modifiedVars eff = do
 
   return $ (hasExtraSensInput, S.delete t sensOutputs)
 
+verifyGreenMvs :: (MonadState SensCxt m)
+               => S.Set Var
+               -> m (Eps, Delta)
+               -> m (S.Set Var)
+verifyGreenMvs modifiedVars eff = do
+  currSt <- get
+  _ <- eff
+  nowCxt <- getSensCxt <$> get
+  let isSensitive x =
+        case M.lookup x nowCxt of
+          Just 0 -> False
+          _ -> True
+      sensOutputs =
+        S.filter isSensitive modifiedVars
+  put currSt
+  return sensOutputs
+
 instance SpecSensCheck (CTCHint :&: Position) where
   specSensCheck c@(CTCHint "amap" [vin, vout, vtin, vidx, vtout, amapBody] body :&: p) =
     case (projectEVar $ vin   ^. shape_info . term,
@@ -736,6 +753,44 @@ instance SpecSensCheck (CTCHint :&: Position) where
                               & eps_delta .~ eff
 
       _ -> throwM $ InvalidExtensionArgs p
+
+  specSensCheck c@(CTCHint "ac" [vidx, litniters, litomega, acBody] body :&: p) =
+    case (projectEVar $ vidx ^. shape_info . term,
+          projectELInt $ litniters ^. shape_info . term,
+          projectELFloat $ litomega ^. shape_info . term,
+          acBody ^? eps_delta,
+          acBody ^? shape_info . mvs,
+          body ^? shape_info . mvs) of
+      (Just _idx,
+       Just _niters,
+       Just _omega,
+       Just acBodyEff,
+       Just acBodyMvs,
+       Just allMvs) -> do
+        shapeInfo <- projShapeCheck c
+        when (_niters < 0) $ do
+          throwM $ S.ExpectPositive p (fromIntegral _niters)
+        when (_omega < 0) $ do
+          throwM $ S.ExpectPositive p _omega
+
+        let eff = do
+              sensOutputs <- verifyGreenMvs acBodyMvs acBodyEff
+              when (not $ S.null sensOutputs) $ do
+                throwM $ ShouldNotOutputTo p sensOutputs
+              currSt <- get
+              (eps, delta) <- acBodyEff
+              put currSt
+              sensmap %= \cxt -> S.foldr (\x -> M.insert x 0) cxt allMvs
+              return $ acFormula eps delta _omega (fromIntegral _niters)
+
+        return $ defaultCInfo & shape_info .~ shapeInfo
+                              & eps_delta .~ eff
+      _ -> throwM $ InvalidExtensionArgs p
+    where acFormula e d omega niters =
+            let e_ = e * sqrt (2 * niters * log (1 / omega))
+                   + niters * e * (exp e - 1)
+                d_ = niters * d + omega
+            in (e_, d_)
 
   specSensCheck c@(CTCHint _ _ body :&: p) = do
     shapeInfo <- projShapeCheck c

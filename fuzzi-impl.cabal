@@ -126,9 +126,11 @@ executable fuzzi
               , aeson
               , bytestring
               , tabular
+              , lens
   other-modules:
       Paths_fuzzi_impl
   default-language: Haskell2010
+  default-extensions: TemplateHaskell
 
 test-suite fuzzi-impl-test
   type: exitcode-stdio-1.0

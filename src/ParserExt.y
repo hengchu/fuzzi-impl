@@ -24,6 +24,7 @@ import Prelude hiding (LT, GT, EQ)
 %name      parseCmd  Cmd
 %name      parseExpr Expr
 %name      parseProg Prog
+%name      parseExtLib ExtLib
 %tokentype { Token }
 %error     { parseError }
 %monad     { Parser } { (>>=) } { return }
@@ -135,6 +136,10 @@ Prog
 : types ManyDecls end Cmd
 { Prog $2 $4 }
 
+ExtLib
+: ManyExtensionDecls
+{ Prog [] $1 }
+
 Cmd :: { Term ImpP'' }
 : ident ':' cmd
 {% do
@@ -164,11 +169,23 @@ Cmd :: { Term ImpP'' }
     extName <- getIdent $1
     return $ iACExt (token2Position $1) extName $3
 }
-| extension ident '(' PushManyIdents ')' '{' Cmd '}' PopManyIdents
+| ExtensionDecl
+{ $1 }
+
+ExtensionDecl
+: extension ident '(' PushManyIdents ')' '{' Cmd '}' PopManyIdents
 {% do
     extName <- getIdent $2
     return $ iACExtDecl (token2Position $1) extName $9 $7
 }
+
+ManyExtensionDecls
+:
+{ inject $ CSkip :&: (Position 0 0) }
+| ExtensionDecl
+{ $1 }
+| ExtensionDecl ';' ManyExtensionDecls
+{ inject $ let p = cmd2Position $1 in CSeq $1 $3 :&: p }
 
 PushManyIdents
 : ManyIdents

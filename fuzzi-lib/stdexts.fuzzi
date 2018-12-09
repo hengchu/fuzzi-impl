@@ -1,0 +1,86 @@
+extension amap(in, out, t_in, idx, t_out, body) {
+  idx = 0;
+  out = [];
+  length(out) = length(in);
+  while idx < length(in) do
+    t_in = in[idx];
+    body : cmd;
+    out[idx] = t_out;
+    idx = idx + 1;
+  end
+};
+
+extension bmap(in, out, t_in, idx, t_out, body) {
+  idx = 0;
+  out = {};
+  length(out) = length(in);
+  while idx < length(in) do
+    t_in = in[idx];
+    body : cmd;
+    out[idx] = t_out;
+    idx = idx + 1;
+  end
+};
+
+extension partition(in, out, t_in, idx, t_out,
+                    t_idx, out_idx, t_part, n_parts,
+                    body) {
+  idx = 0;
+  length(out) = n_parts;
+  while idx < n_parts do
+    t_part = out[idx];
+    length(t_part) = 0;
+    out[idx] = t_part;
+    idx = idx + 1;
+  end;
+
+  bmap(in, out_idx, t_in, idx, t_out, body : cmd);
+
+  idx = 0;
+  while idx < length(out_idx) do
+    t_idx = out_idx[idx];
+    if 0 <= t_idx && t_idx < length(out) then
+      t_part = out[t_idx];
+      length(t_part) = length(t_part) + 1;
+      t_part[length(t_part) - 1] = in[idx];
+      out[t_idx] = t_part;
+    else
+      skip;
+    end;
+    idx = idx + 1;
+  end
+};
+
+extension bsum(in, out, idx, t_in, bound) {
+  idx = 0;
+  out = 0.0;
+  while idx < length(in) do
+    t_in = in[idx];
+    if t_in < -1.0 * bound then
+      out = out - bound;
+    else
+      if t_in > bound then
+        out = out + bound;
+      else
+        out = out + t_in;
+      end
+    end;
+    idx = idx + 1;
+  end
+};
+
+extension ac(idx, n_iters, omega, body) {
+  idx = 0;
+  while idx < n_iters do
+    body : cmd;
+    idx = idx + 1;
+  end;
+
+  /* this is just a hack to make the
+     parser realize omega is an expr */
+  if omega >= 0.0 then
+    skip;
+  else
+    skip;
+  end
+};
