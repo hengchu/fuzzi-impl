@@ -15,7 +15,15 @@
 # resolver:
 #  name: custom-snapshot
 #  location: "./custom-snapshot.yaml"
-resolver: lts-12.20
+resolver: lts-8.11
+compiler: ghcjs-0.2.1.9008011_ghc-8.0.2
+compiler-check: match-exact
+setup-info:
+  ghcjs:
+    source:
+      ghcjs-0.2.1.9008011_ghc-8.0.2:
+        url: https://github.com/matchwood/ghcjs-stack-dist/raw/master/ghcjs-0.2.1.9008011.tar.gz
+        sha1: a72a5181124baf64bcd0e68a8726e65914473b3b
 
 # User packages to be built.
 # Various formats can be used as shown in the example below.
@@ -42,6 +50,7 @@ packages:
 extra-deps:
 - compdata-0.12@sha256:557525e94a6617581693b2c64b96e3073476c837b28642f1a76ab6b79bf7b7e6
 - tree-view-0.5@sha256:85fbc67b53c1ef47f020a69051e6a29b27481698fe802cd2ed8ab0108aa69a38
+- generic-lens-1.1.0.0@sha256:caaab13ae4f2a68e43671d25fb56746ba14bc9d5d787d594a66c7f56eba3fa66
 
 # Override default flag values for local packages and extra-deps
 # flags: {}
