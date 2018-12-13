@@ -8,6 +8,7 @@ import Control.Monad.State
 
 import qualified Data.Set as S
 import qualified Data.Map as M
+import Data.Semigroup
 import Data.Maybe
 import Control.Lens hiding (op)
 import Data.Comp
