@@ -78,12 +78,19 @@ getSensCxt = view sensmap
 newtype Sens = Sens { getSens :: Maybe Float }
   deriving (Show, Eq, Ord)
 
+#if MIN_VERSION_base(4,11,0)
 instance Semigroup Sens where
   (getSens -> Just a) <> (getSens -> Just b) = Sens $ Just $ a + b
   _                   <> _                   = Sens Nothing
+#endif
 
 instance Monoid Sens where
   mempty = Sens . Just $ 0
+#if MIN_VERSION_base(4,11,0)
+#else
+  (getSens -> Just a) <> (getSens -> Just b) = Sens $ Just $ a + b
+  _                   <> _                   = Sens Nothing
+#endif
 
 approx :: Maybe Float -> Maybe Float -> Maybe Float
 approx (Just 0) (Just 0) = Just 0

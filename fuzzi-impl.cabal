@@ -112,6 +112,7 @@ library
                    , GADTs
                    , StandaloneDeriving
                    , ViewPatterns
+                   , CPP
 executable fuzzi
   main-is: Main.hs
   hs-source-dirs:
