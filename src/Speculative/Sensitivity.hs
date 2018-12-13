@@ -88,8 +88,8 @@ instance Monoid Sens where
   mempty = Sens . Just $ 0
 #if MIN_VERSION_base(4,11,0)
 #else
-  (getSens -> Just a) <> (getSens -> Just b) = Sens $ Just $ a + b
-  _                   <> _                   = Sens Nothing
+  mappend (getSens -> Just a) (getSens -> Just b) = Sens $ Just $ a + b
+  mappend _                   _                   = Sens Nothing
 #endif
 
 approx :: Maybe Float -> Maybe Float -> Maybe Float
