@@ -1,0 +1,48 @@
+types
+
+x :[1.0] {{float}};
+y : {{float}};
+
+xin: {float};
+yout: {float};
+
+i1 : int;
+
+xxin: float;
+yyout: float;
+
+i2: int;
+
+end
+
+bmap(x, y, xin, i1, yout,
+  bmap(xin, yout, xxin, i2, yyout,
+    yyout = 2.0 * xxin;
+  );
+  xxin  = 0.0;
+  yyout = 0.0;
+  i2    = 0;
+);
+
+
+/*
+partition(x, y, xin, i, idxout, t_idx, out_idx, t_part, 3,
+  if xin < -1.0 then
+    idxout = 0;
+  else
+    if xin < 0.0 then
+      idxout = 1;
+    else
+      if xin >= 1.0 then
+        idxout = 2;
+      else
+        idxout = 100;
+      end
+    end
+  end
+);
+
+ac(i, 1000, 1.0e-6,
+  b $= lap(10.0, a);
+);
+*/
