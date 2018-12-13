@@ -1,6 +1,6 @@
 module Affine where
 
-import Type.Reflection
+import Data.Typeable
 import Control.Lens
 import Data.Comp
 import Data.Comp.Derive

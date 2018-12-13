@@ -1,6 +1,6 @@
 module Speculative.Sensitivity where
 
-import Type.Reflection
+import Data.Typeable
 import Control.Monad.Catch
 import Control.Monad.Reader
 import Control.Monad.Cont

@@ -1,6 +1,6 @@
 module Shape where
 
-import Type.Reflection
+import Data.Typeable
 
 import Control.Lens hiding (op)
 import Prelude hiding (LT, EQ, GT)

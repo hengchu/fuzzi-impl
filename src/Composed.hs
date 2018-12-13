@@ -10,7 +10,7 @@ import Speculative.Sensitivity
 import Termination hiding (shape_info)
 import Affine hiding (shape_info)
 
-import Type.Reflection
+import Data.Typeable
 
 import Control.Lens
 import Control.Monad.Cont

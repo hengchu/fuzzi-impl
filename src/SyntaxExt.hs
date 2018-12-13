@@ -7,7 +7,7 @@ import Control.Monad
 import Control.Monad.State.Strict
 import Control.Monad.Except
 import Control.Monad.Writer.Strict
-import Type.Reflection
+import Data.Typeable
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Comp
@@ -51,8 +51,9 @@ data ExtVar :: * -> * -> * where
 data AnyExtVar :: * where
   AnyExtVar :: (Typeable s) => ExtVar s a -> AnyExtVar
 
-varSort :: forall s a. (Typeable s) => ExtVar s a -> TypeRep s
-varSort _ = typeRep @s
+eqVarSort :: forall s s' a a'. (Typeable s, Typeable s')
+          => ExtVar s a -> ExtVar s' a' -> Maybe (s :~: s')
+eqVarSort _ _ = eqT @s @s'
 
 anyExprVar :: Var -> AnyExtVar
 anyExprVar = AnyExtVar . EExtVar
@@ -64,8 +65,8 @@ instance Eq AnyExtVar where
   a == b =
     case (a, b) of
       (AnyExtVar a', AnyExtVar b') ->
-        case eqTypeRep (varSort a') (varSort b') of
-          Just HRefl ->
+        case eqVarSort a' b' of
+          Just Refl ->
             case (a', b') of
               (CExtVar a'', CExtVar b'') -> a'' == b''
               (EExtVar a'', EExtVar b'') -> a'' == b''
@@ -75,8 +76,8 @@ instance Ord AnyExtVar where
   compare a b =
     case (a, b) of
       (AnyExtVar a', AnyExtVar b') ->
-        case eqTypeRep (varSort a') (varSort b') of
-          Just HRefl ->
+        case eqVarSort a' b' of
+          Just Refl ->
             case (a', b') of
               (CExtVar a'', CExtVar b'') -> compare a'' b''
               (EExtVar a'', EExtVar b'') -> compare a'' b''
