@@ -71,7 +71,6 @@ tokens :-
 <0>"end"                         { tokAct $ \p _ -> TEnd p }
 <0>"do"                          { tokAct $ \p _ -> TDo p }
 <0>"while"                       { tokAct $ \p _ -> TWhile p }
-<0>"repeat"                      { tokAct $ \p _ -> TRepeat p }
 <0>"skip"                        { tokAct $ \p _ -> TSkip p }
 <0>"fc"                          { tokAct $ \p _ -> TFCast p }
 <0>@identifier                   { ident }
@@ -111,7 +110,6 @@ data Token = TIdent     AlexPosn String
            | TElse      AlexPosn
            | TEnd       AlexPosn
            | TDo        AlexPosn
-           | TRepeat    AlexPosn
            | TWhile     AlexPosn
            | TSkip      AlexPosn
            | TTrue      AlexPosn

@@ -762,6 +762,31 @@ instance SpecSensCheck (CTCHint :&: Position) where
 
       _ -> throwM $ InvalidExtensionArgs p
 
+  specSensCheck c@(CTCHint "repeat" [vidx, litniters, scBody] _ :&: p) =
+    case (projectEVar $ vidx ^. shape_info . term,
+          projectELInt $ litniters ^. shape_info . term,
+          scBody ^? eps_delta,
+          scBody ^? shape_info . mvs) of
+      (Just _idx,
+       Just _niters,
+       Just scBodyEff,
+       Just scBodyMvs) -> do
+        shapeInfo <- projShapeCheck c
+        when (_niters < 0) $ do
+          throwM $ S.ExpectPositive p (fromIntegral _niters)
+        when (_idx `S.member` scBodyMvs) $ do
+          throwM $ ShouldNotOutputTo p (S.singleton _idx)
+
+        let eff 0 = return (0, 0)
+            eff n = do
+              (eps, delta) <- scBodyEff
+              (eps', delta') <- eff (n-1)
+              return (eps + eps', delta + delta')
+
+        return $ defaultCInfo & shape_info .~ shapeInfo
+                              & eps_delta .~ (eff _niters)
+      _ -> throwM $ InvalidExtensionArgs p
+
   specSensCheck c@(CTCHint "ac" [vidx, litniters, litomega, acBody] body :&: p) =
     case (projectEVar $ vidx ^. shape_info . term,
           projectELInt $ litniters ^. shape_info . term,

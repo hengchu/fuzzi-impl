@@ -130,6 +130,16 @@ instance ComposedCheck (CTCHint :&: Position) where
 
     return $ ComposedInfo specsensInfo affineInfo' termInfo'
 
+  composedCheck c@(CTCHint "repeat" [_, _, bodyInfo] _ :&: _) = do
+    specsensInfo <- projSensCheck c
+    affineInfo <- projAffineCheck c
+    termInfo <- projTermCheck c
+
+    let affineInfo' = affineInfo & affine .~ True
+    let termInfo'   = termInfo   & terminates .~ (bodyInfo ^. terminfo . terminates)
+
+    return $ ComposedInfo specsensInfo affineInfo' termInfo'
+
   composedCheck c@(CTCHint "ac" [_, _, _, bodyInfo] _ :&: p) = do
     specsensInfo <- projSensCheck c
     affineInfo <- projAffineCheck c

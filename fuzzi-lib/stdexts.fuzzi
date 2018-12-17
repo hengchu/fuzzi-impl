@@ -84,3 +84,11 @@ extension ac(idx, n_iters, omega, body) {
     skip;
   end
 };
+
+extension repeat(idx, n_iters, body) {
+  idx = 0;
+  while idx < n_iters do
+    body : cmd;
+    idx = idx + 1;
+  end;
+}
