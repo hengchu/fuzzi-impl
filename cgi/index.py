@@ -5,6 +5,7 @@ import cgitb; cgitb.enable()
 import sys
 import os
 import subprocess
+import json
 
 (FUZZI_PATH, _) = os.path.split(sys.argv[0])
 FUZZI_PATH = os.path.join(os.path.abspath(FUZZI_PATH), 'fuzzi')
@@ -16,6 +17,11 @@ def run_fuzzi(code):
                                  stderr=subprocess.PIPE,
                                  stdin=subprocess.PIPE)
     (out, err) = p.communicate(input=code)
+
+    if out:
+        out_parsed = json.loads(out)
+        out = json.dumps(out_parsed, indent=4, sort_keys=True)
+
     return (out, err)
 
 def main():
@@ -61,8 +67,15 @@ def main():
         (out, err) = run_fuzzi(code)
 
         print """
-<p>typechecking result: (%s)</p>
-<p>typechecking error: (%s)</p>
+<p>typechecking result:</p>
+<pre>
+%s
+</pre>
+<br>
+<p>typechecking error:</p>
+<pre>
+%s
+</pre>
 """ % (cgi.escape(out), cgi.escape(err))
 
     print """
