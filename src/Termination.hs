@@ -20,6 +20,7 @@ data TerminationInfo m =
   TerminationInfo {
   _terminationinfo_shape_info :: ShapeInfo
   , _terminationinfo_terminates :: m Bool
+  , _terminationinfo_extterms :: [(String, Position, Bool)]
   }
 
 $(makeLensesWith underscoreFields ''TerminationInfo)
@@ -43,7 +44,7 @@ projShapeCheck :: ( MonadThrow m
                   , Functor f
                   , ShapeCheck f
                   )
-               => f (TerminationInfo (StateT TerminationCxt m)) -> m ShapeInfo
+               => f (TerminationInfo m) -> m ShapeInfo
 projShapeCheck fa =
   shapeCheck (fmap (view shape_info) fa)
 
@@ -84,49 +85,50 @@ hasStaticIntValue e =
 class TerminationCheck f where
   terminationCheck :: ( MonadThrow m
                       , MonadReader ShapeCxt m
+                      , MonadState TerminationCxt m
                       , MonadCont m)
-                   => AlgM m f (TerminationInfo (StateT TerminationCxt m))
+                   => AlgM m f (TerminationInfo m)
 
 $(derive [liftSum] [''TerminationCheck])
 
 instance TerminationCheck (Expr :&: Position) where
   terminationCheck c@(EVar _ :&: _) = do
     shapeInfo <- projShapeCheck c
-    return $ TerminationInfo shapeInfo (return True)
+    return $ TerminationInfo shapeInfo (return True) []
 
   terminationCheck c@(ELength info :&: _) = do
     shapeInfo <- projShapeCheck c
-    return $ TerminationInfo shapeInfo (info ^. terminates)
+    return $ TerminationInfo shapeInfo (info ^. terminates) []
 
   terminationCheck c@(ELit (LInt _) :&: _) = do
     shapeInfo <- projShapeCheck c
-    return $ TerminationInfo shapeInfo (return True)
+    return $ TerminationInfo shapeInfo (return True) []
 
   terminationCheck c@(ELit (LFloat _) :&: _) = do
     shapeInfo <- projShapeCheck c
-    return $ TerminationInfo shapeInfo (return True)
+    return $ TerminationInfo shapeInfo (return True) []
 
   terminationCheck c@(ELit (LBool _) :&: _) = do
     shapeInfo <- projShapeCheck c
-    return $ TerminationInfo shapeInfo (return True)
+    return $ TerminationInfo shapeInfo (return True) []
 
   terminationCheck c@(ELit (LArr infos) :&: _) = do
     shapeInfo <- projShapeCheck c
     let termEff = do
           termInfos <- sequence (infos ^.. traverse . terminates)
           return $ getAll $ foldMap All termInfos
-    return $ TerminationInfo shapeInfo termEff
+    return $ TerminationInfo shapeInfo termEff []
 
   terminationCheck c@(ELit (LBag infos) :&: _) = do
     shapeInfo <- projShapeCheck c
     let termEff = do
           termInfos <- sequence (infos ^.. traverse . terminates)
           return $ getAll $ foldMap All termInfos
-    return $ TerminationInfo shapeInfo termEff
+    return $ TerminationInfo shapeInfo termEff []
 
   terminationCheck c@(EBinop _ linfo rinfo :&: _) = do
     shapeInfo <- projShapeCheck c
-    return $ TerminationInfo shapeInfo ((&&) <$> linfo ^. terminates <*> rinfo ^. terminates)
+    return $ TerminationInfo shapeInfo ((&&) <$> linfo ^. terminates <*> rinfo ^. terminates) []
 
   terminationCheck c@(EIndex linfo rinfo :&: _) = do
     shapeInfo <- projShapeCheck c
@@ -137,40 +139,44 @@ instance TerminationCheck (Expr :&: Position) where
             (Just (TArr _ (Just len)), Just k) ->
               return $ 0 <= k && k < len
             _ -> return False
-    return $ TerminationInfo shapeInfo termEff
+    return $ TerminationInfo shapeInfo termEff []
 
   terminationCheck c@(EFloat info :&: _) = do
     shapeInfo <- projShapeCheck c
-    return $ TerminationInfo shapeInfo (info ^. terminates)
+    return $ TerminationInfo shapeInfo (info ^. terminates) []
 
   terminationCheck c@(EExp info :&: _) = do
     shapeInfo <- projShapeCheck c
-    return $ TerminationInfo shapeInfo (info ^. terminates)
+    return $ TerminationInfo shapeInfo (info ^. terminates) []
 
   terminationCheck c@(ELog info :&: _) = do
     shapeInfo <- projShapeCheck c
-    return $ TerminationInfo shapeInfo (info ^. terminates)
+    return $ TerminationInfo shapeInfo (info ^. terminates) []
 
   terminationCheck c@(EClip info _ :&: _) = do
     shapeInfo <- projShapeCheck c
-    return $ TerminationInfo shapeInfo (info ^. terminates)
+    return $ TerminationInfo shapeInfo (info ^. terminates) []
 
   terminationCheck c@(EScale linfo rinfo :&: _) = do
     shapeInfo <- projShapeCheck c
-    return $ TerminationInfo shapeInfo ((&&) <$> linfo ^. terminates <*> rinfo ^. terminates)
+    return $ TerminationInfo shapeInfo ((&&) <$> linfo ^. terminates <*> rinfo ^. terminates) []
 
   terminationCheck c@(EDot linfo rinfo :&: _) = do
     shapeInfo <- projShapeCheck c
-    return $ TerminationInfo shapeInfo ((&&) <$> linfo ^. terminates <*> rinfo ^. terminates)
+    return $ TerminationInfo shapeInfo ((&&) <$> linfo ^. terminates <*> rinfo ^. terminates) []
 
 instance TerminationCheck (Cmd :&: Position) where
   terminationCheck c@(CAssign linfo rinfo :&: _) = do
     shapeInfo <- projShapeCheck c
-    return $ TerminationInfo shapeInfo ((&&) <$> linfo ^. terminates <*> rinfo ^. terminates)
+    let termEff = do
+          tl <- linfo ^. terminates
+          tr <- rinfo ^. terminates
+          return $ (tl && tr)
+    return $ TerminationInfo shapeInfo termEff []
 
   terminationCheck c@(CLaplace linfo _ rinfo :&: _) = do
     shapeInfo <- projShapeCheck c
-    return $ TerminationInfo shapeInfo ((&&) <$> linfo ^. terminates <*> rinfo ^. terminates)
+    return $ TerminationInfo shapeInfo ((&&) <$> linfo ^. terminates <*> rinfo ^. terminates) []
 
   terminationCheck c@(CIf einfo c1info c2info :&: _) = do
     shapeInfo <- projShapeCheck c
@@ -180,18 +186,19 @@ instance TerminationCheck (Cmd :&: Position) where
     return $ TerminationInfo
                shapeInfo
                termEff
+               []
 
   terminationCheck c@(CWhile _ _ :&: _) = do
     shapeInfo <- projShapeCheck c
-    return $ TerminationInfo shapeInfo (return False)
+    return $ TerminationInfo shapeInfo (return False) []
 
   terminationCheck c@(CSeq c1 c2 :&: _) = do
     shapeInfo <- projShapeCheck c
-    return $ TerminationInfo shapeInfo ((&&) <$> c1 ^. terminates <*> c2 ^. terminates)
+    return $ TerminationInfo shapeInfo ((&&) <$> c1 ^. terminates <*> c2 ^. terminates) []
 
   terminationCheck c@(CSkip :&: _) = do
     shapeInfo <- projShapeCheck c
-    return $ TerminationInfo shapeInfo (return True)
+    return $ TerminationInfo shapeInfo (return True) []
 
 instance TerminationCheck (CTCHint :&: Position) where
   terminationCheck c@(CTCHint "repeat" [vidx, litniters, rpBody] _ :&: p) = do
@@ -207,10 +214,11 @@ instance TerminationCheck (CTCHint :&: Position) where
               currSt <- get
               terms <- mapM termEff [0.._niters-1]
               put currSt
-              return $ getAll $ foldMap All terms
-        return $ TerminationInfo shapeInfo termEff'
+              let t = getAll $ foldMap All terms
+              return t
+        return $ TerminationInfo shapeInfo termEff' []
       _ -> throwM $ InvalidExtensionArgs p
 
   terminationCheck c@(CTCHint _ _ body :&: _) = do
     shapeInfo <- projShapeCheck c
-    return $ TerminationInfo shapeInfo (body ^. terminates)
+    return $ TerminationInfo shapeInfo (body ^. terminates) []

@@ -20,6 +20,15 @@ prodM3 alg1 alg2 alg3 v = do
   v3 <- alg3 $ fmap (view _3) v
   return (v1, v2, v3)
 
+prodM4 :: (Functor f, Monad m)
+       => AlgM m f a -> AlgM m f b -> AlgM m f c -> AlgM m f d -> AlgM m f (a, b, c, d)
+prodM4 alg1 alg2 alg3 alg4 v = do
+  v1 <- alg1 $ fmap (view _1) v
+  v2 <- alg2 $ fmap (view _2) v
+  v3 <- alg3 $ fmap (view _3) v
+  v4 <- alg4 $ fmap (view _4) v
+  return (v1, v2, v3, v4)
+
 -- Build a complex monadic algebra using:
 -- 1. a compose   function 'f'
 -- 2. a decompose function 'g'
