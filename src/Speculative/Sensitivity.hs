@@ -858,7 +858,12 @@ instance SpecSensCheck (CTCHint :&: Position) where
               (eps, delta) <- acBodyEff
               put currSt
               sensmap %= \cxt -> S.foldr (\x -> M.insert x 0) cxt allMvs
-              return $ acFormula eps delta _omega (fromIntegral _niters)
+              case (scFormula eps delta (fromIntegral _niters),
+                    acFormula eps delta _omega (fromIntegral _niters)) of
+                ((sce, scd), (ace, acd))
+                  | sce <= ace && scd <= acd -> return (sce, scd)
+                  | sce >= ace && sce >= acd -> return (ace, acd)
+                  | otherwise                -> return (ace, acd)
 
         return $ defaultCInfo & shape_info .~ shapeInfo
                               & eps_delta .~ eff
@@ -868,6 +873,8 @@ instance SpecSensCheck (CTCHint :&: Position) where
                    + niters * e * (exp e - 1)
                 d_ = niters * d + omega
             in (e_, d_)
+          scFormula e d niters =
+            (e * niters, d * niters)
 
   specSensCheck c@(CTCHint _ _ body :&: p) = do
     shapeInfo <- projShapeCheck c

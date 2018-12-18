@@ -100,7 +100,7 @@ instance ComposedCheck (CTCHint :&: Position) where
 
     let affineInfo' = affineInfo & affine .~ True
 
-    bodyTerminates <- termInfo ^. terminates
+    bodyTerminates <- bodyInfo ^. terminfo . terminates
 
     case bodyTerminates of
       True -> return $ ComposedInfo specsensInfo affineInfo' termInfo
