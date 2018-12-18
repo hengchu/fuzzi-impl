@@ -55,6 +55,7 @@ type Delta = Float
 
 data SensCxt = SensCxt { _senscxt_sensmap :: M.Map Var Float
                        , _senscxt_allow_branch :: Bool
+                       , _senscxt_static_values :: M.Map Var Int
                        }
   deriving (Show, Eq)
 
@@ -147,6 +148,40 @@ projShapeCheck :: ( MonadThrow m
                   , ShapeCheck f)
                => f (SpecSensInfo (StateT s m)) -> m ShapeInfo
 projShapeCheck fa = shapeCheck $ fmap (view shape_info) fa
+
+hasStaticIntValue :: ( MonadThrow m
+                     , MonadReader ShapeCxt m
+                     , MonadState  SensCxt  m
+                     , MonadCont m)
+               => Term ImpTCP -> m (Maybe Int)
+hasStaticIntValue e =
+  case (deepProject @ExprP e) of
+    Just e' ->
+      case unTerm e' of
+        (EBinop PLUS el er :&: _) -> do
+          svl <- hasStaticIntValue (deepInject el)
+          svr <- hasStaticIntValue (deepInject er)
+          return $ (+) <$> svl <*> svr
+        (EBinop MINUS el er :&: _) -> do
+          svl <- hasStaticIntValue (deepInject el)
+          svr <- hasStaticIntValue (deepInject er)
+          return $ (-) <$> svl <*> svr
+        (EBinop MULT el er :&: _) -> do
+          svl <- hasStaticIntValue (deepInject el)
+          svr <- hasStaticIntValue (deepInject er)
+          return $ (*) <$> svl <*> svr
+        (EBinop DIV el er :&: _) -> do
+          svl <- hasStaticIntValue (deepInject el)
+          svr <- hasStaticIntValue (deepInject er)
+          return $ div <$> svl <*> svr
+        _ ->
+          case (projectELInt e, projectEVar e) of
+            (Just v, _     ) -> return (Just v)
+            (_,      Just x) -> do
+              svs <- (view static_values) <$> get
+              return $ M.lookup x svs
+            _ -> return Nothing
+    Nothing -> return Nothing
 
 class SpecSensCheck f where
   specSensCheck :: ( MonadThrow m
@@ -326,8 +361,9 @@ instance SpecSensCheck (Expr :&: Position) where
               rs <- rsens
               case (ls, rs) of
                 (Just _,  Just 0) -> lsens
-                (Nothing, _) ->
-                  case (len, projectELInt (rinfo ^. shape_info . term)) of
+                (Nothing, _) -> do
+                  maybeStaticIdxValue <- hasStaticIntValue $ rinfo ^. shape_info . term
+                  case (len, maybeStaticIdxValue) of
                     (Just len', Just k)
                       | 0 <= k && k < len' -> return Nothing
                     _ -> throwM $ MayNotCoterminate p
@@ -586,7 +622,7 @@ verifyFlow s t modifiedVars eff = do
   -- restore the original state
   sensmap %= \_ -> currCxt
 
-  return $ (hasExtraSensInput, S.delete t sensOutputs)
+  return (hasExtraSensInput, S.delete t sensOutputs)
 
 verifyGreenMvs :: (MonadState SensCxt m)
                => S.Set Var
@@ -780,11 +816,19 @@ instance SpecSensCheck (CTCHint :&: Position) where
         let eff 0 = return (0, 0)
             eff n = do
               (eps, delta) <- scBodyEff
+              static_values %= M.alter (fmap (+1)) _idx
               (eps', delta') <- eff (n-1)
               return (eps + eps', delta + delta')
 
+            eff' = do
+              currStaticValues <- (view static_values) <$> get
+              static_values %= M.insert _idx 0
+              (e', d') <- eff _niters
+              static_values %= \_ -> currStaticValues
+              return (e', d')
+
         return $ defaultCInfo & shape_info .~ shapeInfo
-                              & eps_delta .~ (eff _niters)
+                              & eps_delta .~ eff'
       _ -> throwM $ InvalidExtensionArgs p
 
   specSensCheck c@(CTCHint "ac" [vidx, litniters, litomega, acBody] body :&: p) =
@@ -849,5 +893,5 @@ runSpecSensCheck shapeCxt sensCxt c = run $ do
 
 extractSensCxt :: Prog -> SensCxt
 extractSensCxt (Prog decls _) =
-  SensCxt (M.fromList (map extract decls)) False
+  SensCxt (M.fromList (map extract decls)) False M.empty
   where extract (Decl _ x s _) = (x, s)

@@ -1,12 +1,13 @@
 module Composed where
 
+import qualified Data.Map as M
 import Data.Comp
 import Data.Comp.Derive
 import Algebra
 import SyntaxExt
 
 import Shape
-import Speculative.Sensitivity
+import Speculative.Sensitivity hiding (static_values)
 import Termination hiding (shape_info)
 import Affine hiding (shape_info)
 
@@ -20,9 +21,9 @@ import Control.Monad.Catch
 
 data ComposedInfo m =
   ComposedInfo {
-  _composedinfo_specsens :: SpecSensInfo m
+  _composedinfo_specsens :: SpecSensInfo (StateT SensCxt m)
   , _composedinfo_affineinfo :: AffineInfo
-  , _composedinfo_terminfo :: TerminationInfo
+  , _composedinfo_terminfo :: TerminationInfo (StateT TerminationCxt m)
   }
 
 $(makeLensesWith underscoreFields ''ComposedInfo)
@@ -39,7 +40,7 @@ projSensCheck :: ( MonadThrow m
                  , Functor f
                  , SpecSensCheck f
                  , MonadReader ShapeCxt m)
-              => f (ComposedInfo (StateT SensCxt m)) -> m (SpecSensInfo (StateT SensCxt m))
+              => f (ComposedInfo m) -> m (SpecSensInfo (StateT SensCxt m))
 projSensCheck fa = specSensCheck (fmap (view specsens) fa)
 
 projAffineCheck :: ( MonadReader ShapeCxt m
@@ -55,21 +56,28 @@ projTermCheck :: ( MonadReader ShapeCxt m
                  , MonadCont m
                  , MonadThrow m
                  , TerminationCheck f
-                 , Functor f) => f (ComposedInfo n) -> m TerminationInfo
+                 , Functor f) => f (ComposedInfo m) -> m (TerminationInfo (StateT TerminationCxt m))
 projTermCheck fa = terminationCheck (fmap (view terminfo) fa)
 
 class ComposedCheck f where
   composedCheck :: ( MonadCont m
                    , MonadReader ShapeCxt m
                    , MonadThrow m)
-                => AlgM m f (ComposedInfo (StateT SensCxt m))
+                => AlgM m f (ComposedInfo m)
 
 $(derive [liftSum] [''ComposedCheck])
 
-freeComp :: (Monad m) => (SpecSensInfo n, AffineInfo, TerminationInfo) -> m (ComposedInfo n)
+freeComp :: (Monad m)
+         => (SpecSensInfo (StateT SensCxt m),
+             AffineInfo,
+             TerminationInfo (StateT TerminationCxt m)) -> m (ComposedInfo m)
 freeComp (v1, v2, v3) = return $ ComposedInfo v1 v2 v3
 
-decomp :: (Monad m) => ComposedInfo n -> m (SpecSensInfo n, AffineInfo, TerminationInfo)
+decomp :: (Monad m)
+       => ComposedInfo m
+       -> m (SpecSensInfo (StateT SensCxt m),
+             AffineInfo,
+             TerminationInfo (StateT TerminationCxt m))
 decomp (ComposedInfo v1 v2 v3) = return (v1, v2, v3)
 
 instance ComposedCheck (Expr :&: Position) where
@@ -87,9 +95,11 @@ instance ComposedCheck (CTCHint :&: Position) where
     termInfo     <- projTermCheck c
 
     let affineInfo' = affineInfo & affine .~ True
-    let termInfo'   = termInfo   & terminates .~ True
+    let termInfo'   = termInfo   & terminates .~ return True
 
-    case bodyInfo ^. terminfo . terminates of
+    bodyTerminates <- evalStateT (bodyInfo ^. terminfo . terminates) (TerminationCxt M.empty)
+
+    case bodyTerminates of
       True -> return $ ComposedInfo specsensInfo affineInfo' termInfo'
       False -> throwM $ MapBodyMayNotTerminate p
 
@@ -99,9 +109,11 @@ instance ComposedCheck (CTCHint :&: Position) where
     termInfo <- projTermCheck c
 
     let affineInfo' = affineInfo & affine .~ True
-    let termInfo'   = termInfo   & terminates .~ True
+    let termInfo'   = termInfo   & terminates .~ return True
 
-    case (bodyInfo ^. terminfo . terminates,
+    bodyTerminates <- evalStateT (bodyInfo ^. terminfo . terminates) (TerminationCxt M.empty)
+
+    case (bodyTerminates,
           bodyInfo ^? affineinfo . affine) of
       (True, Just True)  -> return $ ComposedInfo specsensInfo affineInfo' termInfo'
       (False, _)         -> throwM $ MapBodyMayNotTerminate p
@@ -114,9 +126,11 @@ instance ComposedCheck (CTCHint :&: Position) where
     termInfo <- projTermCheck c
 
     let affineInfo' = affineInfo & affine .~ True
-    let termInfo'   = termInfo   & terminates .~ True
+    let termInfo'   = termInfo   & terminates .~ return True
 
-    case bodyInfo ^. terminfo . terminates of
+    bodyTerminates <- evalStateT (bodyInfo ^. terminfo . terminates) (TerminationCxt M.empty)
+
+    case bodyTerminates of
       True  -> return $ ComposedInfo specsensInfo affineInfo' termInfo'
       False -> throwM $ MapBodyMayNotTerminate p
 
@@ -126,17 +140,7 @@ instance ComposedCheck (CTCHint :&: Position) where
     termInfo <- projTermCheck c
 
     let affineInfo' = affineInfo & affine .~ True
-    let termInfo'   = termInfo   & terminates .~ True
-
-    return $ ComposedInfo specsensInfo affineInfo' termInfo'
-
-  composedCheck c@(CTCHint "repeat" [_, _, bodyInfo] _ :&: _) = do
-    specsensInfo <- projSensCheck c
-    affineInfo <- projAffineCheck c
-    termInfo <- projTermCheck c
-
-    let affineInfo' = affineInfo & affine .~ True
-    let termInfo'   = termInfo   & terminates .~ (bodyInfo ^. terminfo . terminates)
+    let termInfo'   = termInfo   & terminates .~ return True
 
     return $ ComposedInfo specsensInfo affineInfo' termInfo'
 
@@ -146,9 +150,11 @@ instance ComposedCheck (CTCHint :&: Position) where
     termInfo <- projTermCheck c
 
     let affineInfo' = affineInfo & affine .~ True
-    let termInfo'   = termInfo   & terminates .~ True
+    let termInfo'   = termInfo   & terminates .~ return True
 
-    case bodyInfo ^. terminfo . terminates of
+    bodyTerminates <- evalStateT (bodyInfo ^. terminfo . terminates) (TerminationCxt M.empty)
+
+    case bodyTerminates of
       True -> return $ ComposedInfo specsensInfo affineInfo' termInfo'
       False -> throwM $ AdvCompBodyMayNotTerminate p
 
@@ -168,4 +174,5 @@ runComposedChecker shapeCxt sensCxt cmd = run $ do
       ((eps, delt), sensCxt') <- runStateT cmdCheck sensCxt
       return (sensCxt', eps, delt)
     _ -> throwM $ ExpectCmd p
-  where run = (flip runContT return) . (flip runReaderT shapeCxt)
+  where run = (flip runContT return)
+              . (flip runReaderT shapeCxt)

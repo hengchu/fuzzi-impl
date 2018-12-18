@@ -171,7 +171,7 @@ main = do
     Left err -> do
       hPutStrLn stderr $ show err
       exitFailure
-    Right (SensCxt cxt _, eps, delta) -> do
+    Right (SensCxt cxt _ _, eps, delta) -> do
       let output = Output cxt eps delta
       B8.hPutStrLn stdout $ encode output
       exitSuccess

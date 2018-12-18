@@ -1,3 +1,4 @@
+types
 db:[1.0] { [float(58)] };
 all_labels: { float };
 label_sum: float;
@@ -27,16 +28,17 @@ t_out_label: float;
 t_label_sum: float;
 j: int;
 t_feature: float;
-t_sum: float
+t_sum: float;
+end
 
 db_size $= lap(1.0, fc(length(db)));
-bmap(db, all_labels, t_in, i, t_out_label, {
+bmap(db, all_labels, t_in, i, t_out_label,
   if t_in[57] == 1.0 then
     t_out_label = 1.0;
   else
     t_out_label = 0.0;
   end
-});
+);
 
 i = 0;
 label_sum = 0.0;
@@ -58,6 +60,8 @@ else
 end;
 negative_fraction = 1.0 - positive_fraction;
 
+
+/*
 j = 0;
 while j < 57 do
   {
@@ -128,3 +132,4 @@ while i < length(b_collection) do
   b = b + b_collection[i];
   i = i + 1;
 end
+*/
