@@ -45,6 +45,9 @@ def main():
     <body>
 
       <h3> Fuzzi Typechecker </h3>
+      <p> Some example code can be found <a href="https://github.com/hengchu/fuzzi-impl/tree/master/testdata/new">here</a> </p>
+      <p> The defined extensions can be found <a href="https://github.com/hengchu/fuzzi-impl/blob/master/fuzzi-lib/stdexts.fuzzi">here</a> </p>
+      <p> You can define your own extensions, but they will only be typechecked using the core rules after expansion </p>
     """
 
     form = cgi.FieldStorage()
