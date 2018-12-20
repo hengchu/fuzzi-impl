@@ -55,19 +55,6 @@ library
               , constraints
               , exceptions
   exposed-modules:
-                --   Lib
-                -- , Syntax
-                -- , Lexer
-                -- , PatternLexer
-                -- , Parser
-                -- , PatternParser
-                -- , Match
-                -- , Pretty
-                -- , PatternQQ
-                -- , Expand
-                -- , ShapeChecker
-                -- , SensitivityChecker
-                -- , Python
                   LexerExt
                 , ParserExt
                 , SyntaxExt
@@ -77,6 +64,7 @@ library
                 , Termination
                 , Speculative.Sensitivity
                 , Composed
+                , Python
   build-tools:
       alex, happy
   other-modules:

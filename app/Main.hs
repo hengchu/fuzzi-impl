@@ -2,16 +2,13 @@ module Main where
 
 import Data.List
 
-import Control.Lens
-import GHC.Generics
 import qualified Data.ByteString.Lazy.Char8 as B8 (hPutStrLn)
 import Data.Aeson hiding (Options)
 import Data.Aeson.TH hiding (Options)
-import qualified Text.Tabular as TT
-import qualified Text.Tabular.AsciiArt as TTA
 import qualified Data.Map as M
 import SyntaxExt
 import Shape
+import Python
 import Speculative.Sensitivity
 import Composed
 import qualified ParserExt as P
@@ -22,8 +19,7 @@ import Control.Monad
 import System.Console.GetOpt
 import Text.PrettyPrint
 
-data ExecMode = ShapeCheckOnly
-              | SensitivityCheck
+data ExecMode = SensitivityCheck
               | TranspileOnly
               deriving (Show, Eq, Ord)
 
@@ -47,10 +43,6 @@ $(deriveJSON defaultOptions{fieldLabelModifier = drop 8} ''Output)
 options :: [OptDescr (Options -> IO Options)]
 options =
   [
-    Option "S" ["shape"]
-      (NoArg
-         (\opt -> return $ opt{optMode = ShapeCheckOnly}))
-      "Shape check only",
     Option "s" ["sensitivity"]
       (NoArg
          (\opt -> return $ opt{optMode = SensitivityCheck}))
@@ -92,20 +84,6 @@ options =
 startOptions :: Options
 startOptions = Options SensitivityCheck "" "stdin" "-" "" 100
 
-{-
-renderContext :: Float -> SContext -> String
-renderContext eps (SContext sctx) =
-  let epsRow = TT.row "epsilon" [show eps]
-  in TTA.render id id (TTA.padLeft 10) $
-       (M.foldrWithKey
-         (\x s acc ->
-             acc
-             TT.+----+ (TT.row x [show s]))
-         (TT.empty TT.^..^ TT.col "value" []
-          TT.+====+ epsRow)
-         sctx)
--}
-
 main :: IO ()
 main = do
   args <- getArgs
@@ -123,11 +101,7 @@ main = do
     exitFailure
 
   let inputFile = optInputFile opts
-  {-
-  let outputFile = optOutputFile opts
   let jsonPath = optDataFile opts
-  let depth = optDepth opts
-  -}
 
   inputFd <- if inputFile == "stdin" then return stdin else openFile inputFile ReadMode
 
@@ -150,7 +124,7 @@ main = do
                 exitFailure
               Right extLib -> return extLib
 
-  ast@(Prog _ cmd) <-
+  ast@(Prog decls cmd) <-
     case P.parse P.parseProg inputContent of
       Left err -> do
         hPutStrLn stderr err
@@ -167,39 +141,22 @@ main = do
         exitFailure
       Right cmd' -> return cmd'
 
-  case runComposedChecker shapeCxt sensCxt cmd' of
-    Left err -> do
-      hPutStrLn stderr $ show err
-      exitFailure
-    Right (SensCxt cxt _ _, eps, delta) -> do
-      let output = Output cxt eps delta
-      B8.hPutStrLn stdout $ encode output
-      exitSuccess
-
-  {-
   case optMode opts of
-    ShapeCheckOnly -> do
-      case runShapeChecker ast' of
+    SensitivityCheck ->
+      case runComposedChecker shapeCxt sensCxt cmd' of
         Left err -> do
           hPutStrLn stderr $ show err
           exitFailure
-        Right _ -> do
-          hPutStrLn stdout $ "program passed shape checker"
+        Right (SensCxt cxt _ _, eps, delta) -> do
+          let output = Output cxt eps delta
+          B8.hPutStrLn stdout $ encode output
           exitSuccess
-    SensitivityCheck -> do
-      case runSensitivityChecker ast' depth of
+    TranspileOnly ->
+      case runPythonify jsonPath decls cmd' of
         Left err -> do
           hPutStrLn stderr $ show err
           exitFailure
-        Right ctx ->
-          mapM_ (hPutStrLn stdout) (map (uncurry renderContext) ctx)
-    TranspileOnly -> do
-      case runTranspiler jsonPath ast' of
-        Left err -> do
-          hPutStrLn stderr $ show err
-          exitFailure
-        Right pythonCode -> do
-          outputFd <- if outputFile == "-" then return stdout else openFile outputFile WriteMode
-          hPutStrLn outputFd $ render pythonCode
+        Right code -> do
+          let output = render code
+          hPutStrLn stdout output
           exitSuccess
--}
