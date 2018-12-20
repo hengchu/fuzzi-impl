@@ -11,18 +11,27 @@ import json
 FUZZI_PATH = os.path.join(os.path.abspath(FUZZI_PATH), 'fuzzi')
 
 
-def run_fuzzi(code):
-    p = subprocess.Popen([FUZZI_PATH, '-I', 'fuzzi-lib/stdexts.fuzzi'],
-                                 stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE,
-                                 stdin=subprocess.PIPE)
-    (out, err) = p.communicate(input=code)
+def run_fuzzi(code, mode, **kwargs):
+    if mode == 'typecheck':
+        p = subprocess.Popen([FUZZI_PATH, '-I', 'fuzzi-lib/stdexts.fuzzi'],
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE,
+                             stdin=subprocess.PIPE)
+        (out, err) = p.communicate(input=code)
 
-    if out:
-        out_parsed = json.loads(out)
-        out = json.dumps(out_parsed, indent=4, sort_keys=True)
+        if out:
+            out_parsed = json.loads(out)
+            out = json.dumps(out_parsed, indent=4, sort_keys=True)
 
-    return (out, err)
+        return (out, err)
+    elif mode == 'pythonify':
+        p = subprocess.Popen([FUZZI_PATH, '-I', 'fuzzi-lib/stdexts.fuzzi', '-t', kwargs['json']],
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE,
+                             stdin=subprocess.PIPE)
+        (out, err) = p.communicate(input=code)
+
+        return (out, err)
 
 def main():
     print "Content-type: text/html"
@@ -39,6 +48,14 @@ def main():
       min-height: 500px;
       font-family: monospace;
     }
+
+    #fuzziform {
+      display: flex;
+      flex-direction: column;
+    }
+
+    #fuzziform div {
+    }
     </style>
     </head>
 
@@ -52,6 +69,11 @@ def main():
 
     form = cgi.FieldStorage()
     code = form.getvalue("fuzzi", "")
+    json = form.getvalue("json-path", "")
+    mode = form.getvalue("run", "")
+
+    if mode not in ['typecheck', 'pythonify']:
+        mode = 'typecheck'
 
     if not code:
         print """
@@ -62,12 +84,23 @@ def main():
 <p>(%s)</p>
 
 <form id="fuzziform" method="post" action="index.cgi">
-  <input type="submit"/>
+  <div>
+    <input type="submit" name="run" value="typecheck"/>
+  </div>
+  <div>
+    <input type="text" name="json-path" placeholder="enter path to data.json" />
+    <input type="submit" name="run" value="pythonify"/>
+  </div>
 </form>
 """ % (cgi.escape(FUZZI_PATH))
 
     else:
-        (out, err) = run_fuzzi(code)
+        out = None
+        err = None
+        if mode == 'typecheck':
+            (out, err) = run_fuzzi(code, mode)
+        elif mode == 'pythonify':
+            (out, err) = run_fuzzi(code, mode, json=json)
 
         print """
 <p>typechecking result:</p>
