@@ -60,71 +60,65 @@ else
 end;
 negative_fraction = 1.0 - positive_fraction;
 
-
-/*
-j = 0;
-while j < 57 do
-  {
-    bmap(db, positive_features, t_in, i, t_feature, {
-      if t_in[57] == 0.0 then
-        t_feature = t_in[j];
-      else
-        t_feature = 0.0;
-      end
-    });
-
-    bmap(db, negative_features, t_in, i, t_feature, {
-      if t_in[57] == 1.0 then
-        t_feature = t_in[j];
-      else
-        t_feature = 0.0;
-      end
-    });
-
-    positive_feature_sum_j = 0.0;
-    negative_feature_sum_j = 0.0;
-    t_sum = 0.0;
-    bsum(positive_features, positive_feature_sum_j, i, t_sum, 1.0);
-    bsum(negative_features, positive_feature_sum_j, i, t_sum, 1.0);
-
-    positive_feature_sum_j $= lap(1.0, positive_feature_sum_j);
-    negative_feature_sum_j $= lap(1.0, negative_feature_sum_j);
-
-    theta_positive[j] = positive_feature_sum_j / label_sum;
-    theta_negative[j] = negative_feature_sum_j / label_sum;
-
-    if theta_positive[j] < 0.0
-    then
-      theta_positive[j] = 0.001;
+repeat(j, 57,
+  bmap(db, positive_features, t_in, i, t_feature,
+    if t_in[57] == 0.0 then
+      t_feature = t_in[j];
     else
-      if theta_positive[j] > 1.0
-      then
-        theta_positive[j] = 0.999;
-      else
-        skip;
-      end
-    end;
+      t_feature = 0.0;
+    end
+  );
 
-    if theta_negative[j] < 0.0
-    then
-      theta_negative[j] = 0.001;
+  bmap(db, negative_features, t_in, i, t_feature,
+    if t_in[57] == 1.0 then
+      t_feature = t_in[j];
     else
-      if theta_negative[j] > 1.0
-      then
-        theta_negative[j] = 0.999;
-      else
-        skip;
-      end
-    end;
+      t_feature = 0.0
+    end
+  );
 
-    w[j] = log(theta_positive[j] / theta_negative[j])
-         - log((1.0 - theta_positive[j]) / (1.0 - theta_negative[j]));
+  positive_feature_sum_j = 0.0;
+  negative_feature_sum_j = 0.0;
+  t_sum = 0.0;
+  bsum(positive_features, positive_feature_sum_j, i, t_sum, 1.0);
+  bsum(negative_features, positive_feature_sum_j, i, t_sum, 1.0);
 
-    b_collection[j] = log((1.0 - theta_positive[j]) / (1.0 - theta_negative[j]))
-                    - log(negative_fraction / positive_fraction);
-  };
-  j = j + 1;
-end;
+  positive_feature_sum_j $= lap(10.0, positive_feature_sum_j);
+  negative_feature_sum_j $= lap(10.0, negative_feature_sum_j);
+
+  theta_positive[j] = positive_feature_sum_j / label_sum;
+  theta_negative[j] = negative_feature_sum_j / label_sum;
+
+  if theta_positive[j] < 0.0
+  then
+    theta_positive[j] = 0.001;
+  else
+    if theta_positive[j] > 1.0
+    then
+      theta_positive[j] = 0.999;
+    else
+      skip;
+    end
+  end;
+
+  if theta_negative[j] < 0.0
+  then
+    theta_negative[j] = 0.001;
+  else
+    if theta_negative[j] > 1.0
+    then
+      theta_negative[j] = 0.999;
+    else
+      skip;
+    end
+  end;
+
+  w[j] = log(theta_positive[j] / theta_negative[j])
+       - log((1.0 - theta_positive[j]) / (1.0 - theta_negative[j]));
+
+  b_collection[j] = log((1.0 - theta_positive[j]) / (1.0 - theta_negative[j]))
+                  - log(negative_fraction / positive_fraction);
+);
 
 b = 0.0;
 i = 0;
@@ -132,4 +126,3 @@ while i < length(b_collection) do
   b = b + b_collection[i];
   i = i + 1;
 end
-*/

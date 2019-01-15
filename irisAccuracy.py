@@ -1,6 +1,6 @@
 import json
 import numpy as np
-import kmeans
+import iris as kmeans
 SIZE = 57
 
 part = kmeans.parts

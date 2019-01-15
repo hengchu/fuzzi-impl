@@ -1,7 +1,10 @@
+types
 /* input data */
 db:[1.0] { [float(5)] };
 /* current centroids */
-cs: [ [float(5)] ];
+cs1 : [float(5)];
+cs2 : [float(5)];
+cs3 : [float(5)];
 /* partitioned input data */
 parts: [ { [float(5)] } ];
 
@@ -16,7 +19,8 @@ t_part: {[float(5)]};
 /* Temporary variables used in the partition computations */
 min_dist: float;
 this_dist: float;
-clear_idx: int;
+j: int;
+k: int;
 
 k_INFINITY: float;
 
@@ -27,65 +31,86 @@ this_partition: { [float(5)] };
 this_partition_k: { float };
 t_coord_k: float;
 t_coord_k_sum: float;
-part_size: float
+part_size: float;
+end
 
 k_INFINITY = 100000000.0;
 
+extension compute_dist(centroid, x, out) {
+  out = (centroid[0] - x[0]) * (centroid[0] - x[0])
+      + (centroid[1] - x[1]) * (centroid[1] - x[1])
+      + (centroid[2] - x[2]) * (centroid[2] - x[2])
+      + (centroid[3] - x[3]) * (centroid[3] - x[3]);
+};
+
 /* Partition the input database into 3 partitions, same as the number of centroids */
-partition(db, parts, t_in, i, t_out, t_idx, out_idx, t_part, 3, {
+partition(db, parts, t_in, i, t_out, t_idx, out_idx, t_part, 3,
   min_dist = k_INFINITY;
   this_dist = 0.0;
   t_out = 0;
 
-  clear_idx = 0;
-  while clear_idx < 3 do
-    {
-      this_dist = (cs[clear_idx][0] - t_in[0]) * (cs[clear_idx][0] - t_in[0])
-                + (cs[clear_idx][1] - t_in[1]) * (cs[clear_idx][1] - t_in[1])
-                + (cs[clear_idx][2] - t_in[2]) * (cs[clear_idx][2] - t_in[2])
-                + (cs[clear_idx][3] - t_in[3]) * (cs[clear_idx][3] - t_in[3]);
+  compute_dist(cs1, t_in, this_dist);
+  if this_dist < min_dist then
+    min_dist = this_dist;
+    t_out = 0;
+  else
+    skip;
+  end;
 
-      if this_dist < min_dist then
-        min_dist = this_dist;
-        t_out = clear_idx;
-      else
-        skip;
-      end
-    };
-    clear_idx = clear_idx + 1;
+  compute_dist(cs2, t_in, this_dist);
+  if this_dist < min_dist then
+    min_dist = this_dist;
+    t_out = 1;
+  else
+    skip;
+  end;
+
+  compute_dist(cs3, t_in, this_dist);
+  if this_dist < min_dist then
+    min_dist = this_dist;
+    t_out = 2;
+  else
+    skip;
   end;
 
   min_dist = 0.0;
   this_dist = 0.0;
-});
+);
 
-
-clear_idx = 0;
-while clear_idx < 3 do
-  {
-    this_partition = parts[clear_idx];
-    k = 0;
-    while k < 5 do
-      {
-        i = 0;
-        bmap(this_partition, this_partition_k, t_in, i, t_coord_k, {t_coord_k = t_in[clear_idx]});
-        t_coord_k_sum = 0.0;
-        t_coord_k = 0.0;
-        i = 0;
-        /* Add up all entries in kth coordinate */
-        bsum(this_partition_k, t_coord_k_sum, i, t_coord_k, 8.0);
-
-        /* normalize */
-        part_size $= lap(1.0, fc(length(this_partition_k)));
-        t_coord_k_sum $= lap(1.0, t_coord_k_sum);
-        t_coord_k_sum = t_coord_k_sum / part_size;
-
-        cs_j = cs[clear_idx];
-        cs_j[k] = t_coord_k_sum;
-        cs[clear_idx] = cs_j;
-      };
-      k = k + 1;
+extension get_cs(idx, out) {
+  if idx == 0 then
+    out = cs1;
+  else
+    if idx == 1 then
+      out = cs2;
+    else
+      out = cs3;
     end
-  };
-  clear_idx = clear_idx + 1;
-end
+  end
+};
+
+extension set_cs(idx, in) {
+  if idx == 0 then
+    cs1 = in;
+  else
+    if idx == 1 then
+      cs2 = in;
+    else
+      cs3 = in;
+    end
+  end
+};
+
+repeat(j, 3,
+  this_partition = parts[j];
+  repeat(k, 5,
+    bmap(this_partition, this_partition_k, t_in, i, t_coord_k, t_coord_k = t_in[j]);
+    bsum(this_partition_k, t_coord_k_sum, i, t_coord_k, 1.0);
+    part_size $= lap(1.0, fc(length(this_partition_k)));
+    t_coord_k_sum $= lap(5.0, t_coord_k_sum);
+    t_coord_k_sum = t_coord_k_sum / part_size;
+    get_cs(j, cs_j);
+    cs_j[k] = t_coord_k_sum;
+    set_cs(j, cs_j);
+  );
+);

@@ -29,7 +29,10 @@ data['db'] = l
 x0 = random.randint(0, len(l)-1)
 x1 = random.randint(0, len(l)-1)
 x2 = random.randint(0, len(l)-1)
-data['cs'] = [l[x0], l[x1], l[x2]]
+data['cs1'] = l[x0]
+data['cs2'] = l[x1]
+data['cs3'] = l[x2]
+#data['cs'] = [l[x0], l[x1], l[x2]]
 
 data_json_str = json.dumps(data, indent=4)
 
