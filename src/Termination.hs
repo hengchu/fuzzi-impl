@@ -219,6 +219,31 @@ instance TerminationCheck (CTCHint :&: Position) where
         return $ TerminationInfo shapeInfo termEff' []
       _ -> throwM $ InvalidExtensionArgs p
 
+  terminationCheck c@(CTCHint "bmap" [_, _, _, _, _, bodyInfo] _ :&: _) = do
+    shapeInfo <- projShapeCheck c
+    let termEff = bodyInfo ^. terminates
+    return $ TerminationInfo shapeInfo termEff []
+
+  terminationCheck c@(CTCHint "amap" [_, _, _, _, _, bodyInfo] _ :&: _) = do
+    shapeInfo <- projShapeCheck c
+    let termEff = bodyInfo ^. terminates
+    return $ TerminationInfo shapeInfo termEff []
+
+  terminationCheck c@(CTCHint "partition" [_, _, _, _, _, _, _, _, _, bodyInfo] _ :&: _) = do
+    shapeInfo <- projShapeCheck c
+    let termEff = bodyInfo ^. terminates
+    return $ TerminationInfo shapeInfo termEff []
+
+  terminationCheck c@(CTCHint "bsum" _ _ :&: _) = do
+    shapeInfo <- projShapeCheck c
+    let termEff = return True
+    return $ TerminationInfo shapeInfo termEff []
+
+  terminationCheck c@(CTCHint "ac" [_, _, _, _, bodyInfo] _ :&: _) = do
+    shapeInfo <- projShapeCheck c
+    let termEff = bodyInfo ^. terminates
+    return $ TerminationInfo shapeInfo termEff []
+
   terminationCheck c@(CTCHint _ _ body :&: _) = do
     shapeInfo <- projShapeCheck c
     return $ TerminationInfo shapeInfo (body ^. terminates) []

@@ -361,13 +361,12 @@ instance SpecSensCheck (Expr :&: Position) where
               rs <- rsens
               case (ls, rs) of
                 (Just _,  Just 0) -> lsens
-                (Nothing, _) -> do
+                _ -> do
                   maybeStaticIdxValue <- hasStaticIntValue $ rinfo ^. shape_info . term
                   case (len, maybeStaticIdxValue) of
                     (Just len', Just k)
                       | 0 <= k && k < len' -> return Nothing
-                    _ -> throwM $ MayNotCoterminate p
-                _ -> throwM $ MayNotCoterminate p
+                    _ -> traceShow (len, maybeStaticIdxValue) $ throwM $ MayNotCoterminate p
         return $ defaultEInfo & shape_info .~ shapeInfo
                               & sens .~ eSens
       (Just (TBag _), Just lsens, Just rsens) -> do

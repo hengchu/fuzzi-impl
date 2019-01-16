@@ -1,0 +1,120 @@
+types
+/* input partitions of MNIST data */
+db_partitions:[1.0] { { [ float(785) ] } };
+db1_partitions:     { { [ float(786) ] } };
+
+/* the gradients computed from each row in each partition */
+dws_partitions : { { [float(785)] } };
+/* model parameters for each partition */
+ws_partitions : { [ float(785)] };
+
+/* initial weights */
+w : [float(785)];
+
+/* aux variable for mapping over db partitions */
+t_db   : { [ float(785) ] };
+t_db1  : { [ float(786) ] };
+tt_db  :   [ float(785) ];
+tt_db1 :   [ float(786) ];
+
+/* aux variables for computing gradients */
+t_dws    : { [float(785)] };
+tt_dws   :   [float(785)];
+t_ws     :   [float(785)];
+t_dws_j  : {  float       };
+
+tt_dws_j :    float;
+dt       :    float;
+temp     :    float;
+prob     :    float;
+sc       :    float;
+size     :    float;
+sum      :    float;
+
+/* index variables */
+i : int;
+j : int;
+k : int;
+
+/* 0-sens variables */
+zero_785 : [ float(785) ];
+zero_786 : [ float(786) ];
+end
+
+/* first, extend each row of data with a 1 */
+bmap(db_partitions, db1_partitions, t_db, i, t_db1,
+  bmap(t_db, t_db1, tt_db, j, tt_db1,
+    /* reset mvs so we don't depend on their values */
+    tt_db1 = zero_786;
+    k      = 0;
+
+    repeat(k, 785,
+      tt_db1[k+1] = tt_db[k];
+    );
+    /* put the 1.0 in the front */
+    tt_db1[0] = 1.0;
+  );
+
+  /* more reset */
+  tt_db  = zero_785;
+  tt_db1 = zero_786;
+
+  j      = 0;
+  k      = 0;
+);
+
+/* compute gradients for each partition */
+bmap(db1_partitions, dws_partitions, t_db1, i, t_dws,
+  bmap(t_db1, t_dws, tt_db1, j, tt_dws,
+    /* reset mvs so we don't depend on their values */
+    tt_dws = zero_785;
+    k = 0;
+
+    repeat(k, 785,
+      tt_dws[k] = tt_db1[k];
+    );
+
+    dt     = clip(dot(tt_dws, w), 100.0);
+    temp   = exp(-1.0 * tt_db1[785] * dt);
+    prob   = 1.0 / (1.0 + temp);
+    sc     = (1.0 - prob) * tt_db1[785];
+    tt_dws = scale(sc, tt_dws);
+
+    dt = 0.0;
+    temp = 0.0;
+    prob = 0.0;
+    sc = 0.0;
+  );
+
+  tt_db1 = zero_786;
+  tt_dws = zero_785;
+  j      = 0;
+  k      = 0;
+  dt     = 0.0;
+  temp   = 0.0;
+  prob   = 0.0;
+  sc     = 0.0;
+);
+
+/* compute new weights for each partition */
+bmap(dws_partitions, ws_partitions, t_dws, i, t_ws,
+  j    = 0;
+  t_ws = zero_785;
+  size = fc(length(t_dws));
+
+  repeat(j, 785,
+    sum = 0.0;
+    bmap(t_dws, t_dws_j, tt_dws, k, tt_dws_j, tt_dws_j = tt_dws[j]);
+    bsum(t_dws_j, sum, k, tt_dws_j, 1000000.0);
+
+    t_ws[j] = sum / size;
+  );
+
+  t_dws_j  = {};
+  tt_dws   = zero_785;
+  tt_dws_j = 0.0;
+  k = 0;
+  j = 0;
+  sum = 0.0;
+  size = 0.0;
+);
