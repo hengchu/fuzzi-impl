@@ -5,9 +5,9 @@ SIZE = 784
 
 w = mnist784.w
 
-g = open('testdata/mnist784.json')
+g = open('testdata/mnist.json')
 train = json.load(g)
-X = train['db']
+X = train['db_test']
 
 X_no_labels = np.array([X[i][0:SIZE] for i in range(len(X))])
 labels = [X[i][SIZE] for i in range(len(X))]

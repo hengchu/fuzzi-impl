@@ -39,7 +39,14 @@ k : int;
 /* 0-sens variables */
 zero_785 : [ float(785) ];
 zero_786 : [ float(786) ];
+
+/* hyperparams */
+lamb : float;
+rate : float;
 end
+
+lamb = 0.1;
+rate = 0.1;
 
 /* first, extend each row of data with a 1 */
 bmap(db_partitions, db1_partitions, t_db, i, t_db1,
@@ -107,7 +114,7 @@ bmap(dws_partitions, ws_partitions, t_dws, i, t_ws,
     bmap(t_dws, t_dws_j, tt_dws, k, tt_dws_j, tt_dws_j = tt_dws[j]);
     bsum(t_dws_j, sum, k, tt_dws_j, 1000000.0);
 
-    t_ws[j] = sum / size;
+    t_ws[j] = w[j] + (sum / size - 2.0 * lamb * w[j]) * rate;
   );
 
   t_dws_j  = {};
