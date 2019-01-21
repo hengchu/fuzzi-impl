@@ -32,7 +32,12 @@ this_partition_k: { float };
 t_coord_k: float;
 t_coord_k_sum: float;
 part_size: float;
+epoch : int;
+
+zero_5 : [float(5)];
 end
+
+epoch = 0;
 
 k_INFINITY = 100000000.0;
 
@@ -42,6 +47,8 @@ extension compute_dist(centroid, x, out) {
       + (centroid[2] - x[2]) * (centroid[2] - x[2])
       + (centroid[3] - x[3]) * (centroid[3] - x[3]);
 };
+
+repeat(epoch, 5,
 
 /* Partition the input database into 3 partitions, same as the number of centroids */
 partition(db, parts, t_in, i, t_out, t_idx, out_idx, t_part, 3,
@@ -103,14 +110,16 @@ extension set_cs(idx, in) {
 
 repeat(j, 3,
   this_partition = parts[j];
-  repeat(k, 5,
-    bmap(this_partition, this_partition_k, t_in, i, t_coord_k, t_coord_k = t_in[j]);
+  part_size $= lap(1.0, fc(length(this_partition)));
+  repeat(k, 4,
+    bmap(this_partition, this_partition_k, t_in, i, t_coord_k, t_coord_k = t_in[k]);
     bsum(this_partition_k, t_coord_k_sum, i, t_coord_k, 1.0);
-    part_size $= lap(1.0, fc(length(this_partition_k)));
-    t_coord_k_sum $= lap(5.0, t_coord_k_sum);
+    t_coord_k_sum $= lap(10.0, t_coord_k_sum);
     t_coord_k_sum = t_coord_k_sum / part_size;
     get_cs(j, cs_j);
     cs_j[k] = t_coord_k_sum;
-    set_cs(j, cs_j);
   );
+  set_cs(j, cs_j);
+);
+
 );

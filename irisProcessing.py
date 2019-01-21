@@ -23,7 +23,10 @@ for i in range(len(l)):
 
 data = {}
 
-data['db'] = l
+print(len(l[0]))
+random.shuffle(l)
+data['db'] = l[0:100]
+data['db_test'] = l[100:-1]
 
 #Initial cluster centers (can be played with)
 x0 = random.randint(0, len(l)-1)

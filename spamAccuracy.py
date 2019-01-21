@@ -8,7 +8,7 @@ b = naiveBayes.b
 
 g = open('testdata/spam.json')
 train = json.load(g)
-X = train['db']
+X = train['db_test']
 
 X_no_labels = np.array([X[i][0:SIZE] for i in range(len(X))])
 labels = [(X[i][SIZE]*2.0-1.0) for i in range(len(X))]

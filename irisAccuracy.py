@@ -7,7 +7,7 @@ part = kmeans.parts
 
 g = open('testdata/iris.json')
 train = json.load(g)
-X = train['db']
+X = train['db_test']
 
 print ('our results (0):' + str(len(part[0])))
 print ('our results (1):' + str(len(part[1])))

@@ -37,7 +37,7 @@ epoch = 0;
 
 size $= lap(10.0, fc(length(db)));
 
-ac(epoch, 10, 1.0e-6,
+ac(epoch, 100, 1.0e-6,
 
 /* extend each row with a constant 1.0 for bias */
 bmap(db, db1, trow, i, trow1,
@@ -81,7 +81,7 @@ repeat(j, 785,
   bmap(dws, dws_j, twout, i, tf_out, tf_out = twout[j];);
   i = 0;tf_out = 0.0;
   bsum(dws_j, j_sum, i, tf_out, 1.0);
-  j_sum $= lap(1000.0, j_sum);
+  j_sum $= lap(5000.0, j_sum);
   w[j] = w[j] + (j_sum / size - 2.0 * lamb * w[j]) * rate;
 );
 
