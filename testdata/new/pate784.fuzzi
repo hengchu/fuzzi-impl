@@ -8,8 +8,13 @@ dws_partitions : { { [float(785)] } };
 /* model parameters for each partition */
 ws_partitions : { [ float(785)] };
 
+w   : [float(785)];
 /* initial weights */
-w : [float(785)];
+ws1 : [float(785)];
+ws2 : [float(785)];
+ws3 : [float(785)];
+ws4 : [float(785)];
+ws5 : [float(785)];
 
 /* aux variable for mapping over db partitions */
 t_db   : { [ float(785) ] };
@@ -44,6 +49,26 @@ zero_786 : [ float(786) ];
 lamb : float;
 rate : float;
 end
+
+extension get_ws(idx, out) {
+  if idx == 0 then
+    out = ws1;
+  else
+    if idx == 1 then
+      out = ws2
+    else
+      if idx == 2 then
+        out = ws3
+      else
+        if idx == 3 then
+          out = ws4
+        else
+          out = ws5
+        end
+      end
+    end
+  end
+};
 
 lamb = 0.1;
 rate = 0.1;
