@@ -56,6 +56,8 @@ tokens :-
 <0>"$="                          { tokAct $ \p _ -> TSample p }
 <0>"=="                          { tokAct $ \p _ -> TEqEq p }
 <0>"="                           { tokAct $ \p _ -> TEq p }
+<0>"fst"                         { tokAct $ \p _ -> TFst p }
+<0>"snd"                         { tokAct $ \p _ -> TSnd p }
 <0>"exp"                         { tokAct $ \p _ -> TExp p }
 <0>"log"                         { tokAct $ \p _ -> TLog p }
 <0>"lap"                         { tokAct $ \p _ -> TLaplace p }
@@ -135,6 +137,8 @@ data Token = TIdent     AlexPosn String
            | TExprAnn   AlexPosn
            | TExt       AlexPosn
            | TTypes     AlexPosn
+           | TFst       AlexPosn
+           | TSnd       AlexPosn
            | TEOF       AlexPosn
   deriving (Generic, Show, Eq)
 

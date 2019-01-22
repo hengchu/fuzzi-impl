@@ -22,6 +22,7 @@ data Tau = TInt
          | TFloat
          | TBool
          | TAny
+         | TProd Tau Tau
          | TArr { _tau_ty :: Tau, _tau_fixed_length :: (Maybe Int) }
          | TBag { _tau_ty :: Tau }
          deriving (Show, Eq)
@@ -114,6 +115,8 @@ data Expr e = EVar Var
             | EClip e (Lit e)
             | EScale e e
             | EDot e e
+            | EFst e
+            | ESnd e
             deriving Functor
 
 type ExprP  = Expr :&: Position
@@ -277,6 +280,12 @@ instance Wellformed Expr where
   syntaxSort (EDot e1 e2) = do
     guard (e1 == Expression)
     guard (e2 == Expression)
+    return Expression
+  syntaxSort (EFst e1) = do
+    guard (e1 == Expression)
+    return Expression
+  syntaxSort (ESnd e1) = do
+    guard (e1 == Expression)
     return Expression
 
 instance Wellformed (ExtVar C) where

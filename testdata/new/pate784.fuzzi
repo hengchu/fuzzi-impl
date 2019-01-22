@@ -1,7 +1,7 @@
 types
 /* input partitions of MNIST data */
-db_partitions:[1.0] { { [ float(785) ] } };
-db1_partitions:     { { [ float(786) ] } };
+db_partitions:[1.0] { ({ [ float(785) ] }, [float(785)]) };
+db1_partitions:     { ({ [ float(786) ] }, [float(785)]) };
 
 /* the gradients computed from each row in each partition */
 dws_partitions : { { [float(785)] } };
@@ -17,8 +17,12 @@ ws4 : [float(785)];
 ws5 : [float(785)];
 
 /* aux variable for mapping over db partitions */
-t_db   : { [ float(785) ] };
-t_db1  : { [ float(786) ] };
+t_db   : ({ [ float(785) ] }, [float(785)]);
+t_db_fst : { [ float(785) ] };
+
+t_db1  : ({ [ float(786) ] }, [float(785)]);
+t_db1_fst : { [ float(786) ] };
+
 tt_db  :   [ float(785) ];
 tt_db1 :   [ float(786) ];
 
@@ -44,6 +48,8 @@ k : int;
 /* 0-sens variables */
 zero_785 : [ float(785) ];
 zero_786 : [ float(786) ];
+zero_785_785 : ({ [ float(785) ] }, [float(785)]);
+zero_786_785 : ({ [ float(786) ] }, [float(785)]);
 
 /* hyperparams */
 lamb : float;
@@ -75,7 +81,9 @@ rate = 0.1;
 
 /* first, extend each row of data with a 1 */
 bmap(db_partitions, db1_partitions, t_db, i, t_db1,
-  bmap(t_db, t_db1, tt_db, j, tt_db1,
+  t_db_fst = fst(t_db);
+
+  bmap(t_db_fst, t_db1_fst, tt_db, j, tt_db1,
     /* reset mvs so we don't depend on their values */
     tt_db1 = zero_786;
     k      = 0;
@@ -87,9 +95,15 @@ bmap(db_partitions, db1_partitions, t_db, i, t_db1,
     tt_db1[0] = 1.0;
   );
 
+  t_db1 = zero_786_785;
+  fst(t_db1) = t_db1_fst;
+  snd(t_db1) = snd(t_db);
+
   /* more reset */
   tt_db  = zero_785;
   tt_db1 = zero_786;
+  t_db_fst = {};
+  t_db1_fst = {};
 
   j      = 0;
   k      = 0;
@@ -97,7 +111,9 @@ bmap(db_partitions, db1_partitions, t_db, i, t_db1,
 
 /* compute gradients for each partition */
 bmap(db1_partitions, dws_partitions, t_db1, i, t_dws,
-  bmap(t_db1, t_dws, tt_db1, j, tt_dws,
+  t_db1_fst = fst(t_db1);
+
+  bmap(t_db1_fst, t_dws, tt_db1, j, tt_dws,
     /* reset mvs so we don't depend on their values */
     tt_dws = zero_785;
     k = 0;
@@ -106,7 +122,7 @@ bmap(db1_partitions, dws_partitions, t_db1, i, t_dws,
       tt_dws[k] = tt_db1[k];
     );
 
-    dt     = clip(dot(tt_dws, w), 100.0);
+    dt     = clip(dot(tt_dws, snd(t_db1)), 100.0);
     temp   = exp(-1.0 * tt_db1[785] * dt);
     prob   = 1.0 / (1.0 + temp);
     sc     = (1.0 - prob) * tt_db1[785];
@@ -126,6 +142,7 @@ bmap(db1_partitions, dws_partitions, t_db1, i, t_dws,
   temp   = 0.0;
   prob   = 0.0;
   sc     = 0.0;
+  t_db1_fst = {};
 );
 
 /* compute new weights for each partition */

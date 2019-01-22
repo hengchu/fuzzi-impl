@@ -186,18 +186,33 @@ instance Pythonify (Expr :&: Position) where
     return $ defaultPythonCode & doc .~ (\_ -> dotDoc)
                                & shape .~ spinfo
 
+  pythonify c@(EFst code :&: _) = do
+    spinfo <- projectShapeCheck c
+    let tupleDoc = (code ^. doc) 0
+        fstDoc = tupleDoc <> (brackets $ int 0)
+    return $ defaultPythonCode & doc .~ (\_ -> fstDoc)
+                               & shape .~ spinfo
+
+  pythonify c@(ESnd code :&: _) = do
+    spinfo <- projectShapeCheck c
+    let tupleDoc = (code ^. doc) 1
+        fstDoc = tupleDoc <> (brackets $ int 1)
+    return $ defaultPythonCode & doc .~ (\_ -> fstDoc)
+                               & shape .~ spinfo
+
 tauNeedsCopy :: Tau -> Bool
 tauNeedsCopy (TArr _ _) = True
 tauNeedsCopy (TBag _)   = True
 tauNeedsCopy _ = False
 
 isTauNumericArray' :: Bool -> Tau -> Bool
-isTauNumericArray' inarray TInt       = inarray
-isTauNumericArray' inarray TFloat     = inarray
-isTauNumericArray' inarray TBool      = inarray
-isTauNumericArray' inarray TAny       = inarray
-isTauNumericArray' inarray (TArr t _) = inarray && (isTauNumericArray' True t)
-isTauNumericArray' _       (TBag _)   = False
+isTauNumericArray' inarray TInt        = inarray
+isTauNumericArray' inarray TFloat      = inarray
+isTauNumericArray' inarray TBool       = inarray
+isTauNumericArray' inarray TAny        = inarray
+isTauNumericArray' inarray (TArr t _)  = inarray && (isTauNumericArray' True t)
+isTauNumericArray' _       (TBag _)    = False
+isTauNumericArray' _       (TProd _ _) = False
 
 isTauNumericArray :: Tau -> Bool
 isTauNumericArray (TArr t _) = isTauNumericArray' True t
@@ -225,6 +240,10 @@ defaultValue t@(TArr _ Nothing)
   | otherwise =
       return $ brackets empty
 defaultValue (TBag _) = return $ brackets empty
+defaultValue (TProd t1 t2) = do
+  t1v <- defaultValue t1
+  t2v <- defaultValue t2
+  return $ brackets (t1v <> comma <+> t2v)
 
 getArrayOrBagContentTau :: (MonadThrow m) => Tau -> Position -> m Tau
 getArrayOrBagContentTau (TArr t _) _ = return t

@@ -73,6 +73,8 @@ import Prelude hiding (LT, GT, EQ)
   clip      { TClip _ }
   scale     { TScale _ }
   dot       { TDotP _ }
+  fst       { TFst _ }
+  snd       { TSnd _ }
   fcast     { TFCast _ }
   cmd       { TCmdAnn _ }
   expr      { TExprAnn _ }
@@ -112,6 +114,8 @@ Ty
 { S.TArr $2 Nothing }
 | '{' Ty '}'
 { S.TBag $2 }
+| '(' Ty ',' Ty ')'
+{ S.TProd $2 $4 }
 
 Decl
 : ident ':' Ty
@@ -331,6 +335,10 @@ Expr :: { Term ExprP' }
 { inject $ EFloat $3 :&: (token2Position $1) }
 | clip '(' Expr ',' Literal ')'
 { inject $ EClip $3 (snd $5) :&: (token2Position $1) }
+| fst '(' Expr ')'
+{ inject $ EFst $3 :&: (token2Position $1) }
+| snd '(' Expr ')'
+{ inject $ ESnd $3 :&: (token2Position $1) }
 
 ManyExprs
 :

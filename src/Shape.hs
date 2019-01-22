@@ -17,6 +17,7 @@ import Control.Monad.Catch
 import Control.Monad.Reader
 
 data ShapeCheckError = ExpectTau       Position Tau Tau -- expected type, got type
+                     | ExpectProd      Position Tau     -- expected prod, got type
                      | ExpectArr       Position Tau     -- expected arrays/bags, got this type
                      | ExpectNum       Position Tau     -- expected numeric type, got type
                      | ExpectSmall     Position Tau     -- expected small type, got type
@@ -205,6 +206,20 @@ instance ShapeCheck (Expr :&: Position) where
         | len1 == len2 -> return $ defaultEInfo & tau .~ TFloat
                                                 & term .~ (iAEDot p (linfo ^. term) (rinfo ^. term))
       _ -> throwM $ Mismatch p [tv1, tv2] [linfo ^. term, rinfo ^. term]
+  shapeCheck (EFst info@((preview tau) -> Just tprod) :&: p) = do
+    case tprod of
+      TProd t1 _ ->
+        return $ defaultEInfo & tau .~ t1
+                              & term .~ (iAEFst p (info ^. term))
+      _ -> throwM $ ExpectProd p tprod
+
+  shapeCheck (ESnd info@((preview tau) -> Just tprod) :&: p) = do
+    case tprod of
+      TProd _ t2 ->
+        return $ defaultEInfo & tau .~ t2
+                              & term .~ (iAEFst p (info ^. term))
+      _ -> throwM $ ExpectProd p tprod
+
   shapeCheck (t :&: p) =
     throwM $ ExpectExpr p
 
@@ -224,6 +239,14 @@ instance ShapeCheck (Cmd :&: Position) where
     modifiedVars <-
       callCC $ \good -> do
         case project @ExprP (linfo ^. term) of
+          Just (EFst lhs :&: _) ->
+            case project @ExprP lhs of
+              Just (EVar v :&: _) -> good (S.singleton v)
+              _ -> throwM $ UnsupportedAssign p
+          Just (ESnd lhs :&: _) ->
+            case project @ExprP lhs of
+              Just (EVar v :&: _) -> good (S.singleton v)
+              _ -> throwM $ UnsupportedAssign p
           Just (EVar v :&: _) -> good (S.singleton v)
           Just (ELength lhs :&: _) ->
             case project @ExprP lhs of

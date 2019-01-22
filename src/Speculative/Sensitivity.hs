@@ -430,7 +430,21 @@ instance SpecSensCheck (Expr :&: Position) where
                               & shape_info .~ shapeInfo
       _ -> throwM $ InternalError p "bug: shape checker let through bad dot expr"
 
+  specSensCheck c@(EFst info :&: p) = do
+    shapeInfo <- projShapeCheck c
+    case info ^? sens of
+      Just sens' ->
+        return $ defaultEInfo & sens .~ sens'
+                              & shape_info .~ shapeInfo
+      _ -> throwM $ InternalError p "bug: shape checker let through bad fst projection"
 
+  specSensCheck c@(ESnd info :&: p) = do
+    shapeInfo <- projShapeCheck c
+    case info ^? sens of
+      Just sens' ->
+        return $ defaultEInfo & sens .~ sens'
+                              & shape_info .~ shapeInfo
+      _ -> throwM $ InternalError p "bug: shape checker let through bad fst projection"
 
 instance SpecSensCheck (Cmd :&: Position) where
   specSensCheck c@(CAssign lhs rhs :&: p) = do
@@ -482,6 +496,26 @@ instance SpecSensCheck (Cmd :&: Position) where
                     sensmap %= M.alter (const Nothing) x
                   | otherwise -> throwM $ MayNotCoterminate p
                 _ -> throwM $ InternalError p "bug: shape checker let through bad length assignment"
+              return (0, 0)
+        return $ defaultCInfo & shape_info .~ shapeInfo
+                              & eps_delta .~ epsDelta
+      (Just (EFst (projectEVar -> Just x) :&: _),
+       Just lsens,
+       Just rsens) -> do
+        let epsDelta = do
+              ls <- lsens
+              rs <- rsens
+              sensmap %= M.alter (const (approx ls rs)) x
+              return (0, 0)
+        return $ defaultCInfo & shape_info .~ shapeInfo
+                              & eps_delta .~ epsDelta
+      (Just (ESnd (projectEVar -> Just x) :&: _),
+       Just lsens,
+       Just rsens) -> do
+        let epsDelta = do
+              ls <- lsens
+              rs <- rsens
+              sensmap %= M.alter (const (approx ls rs)) x
               return (0, 0)
         return $ defaultCInfo & shape_info .~ shapeInfo
                               & eps_delta .~ epsDelta
@@ -700,8 +734,11 @@ instance SpecSensCheck (CTCHint :&: Position) where
         let eff = do
               allow_branch %= const True
               (extraSensSrcs, extraSensOutputs) <- verifyFlow _tin _tout modifiedVars bmapBodyEff
+              {- TODO: (HZH) this should be split into a separate extension called bmap_weak or
+              something, but for now this will do
               when (extraSensSrcs) $ do
                 throwM $ ExtraSensInput p
+              -}
               when (not (S.null extraSensOutputs)) $ do
                 throwM $ ShouldNotOutputTo p extraSensOutputs
 
@@ -712,7 +749,7 @@ instance SpecSensCheck (CTCHint :&: Position) where
 
               -- set the sensitivity of all modified variables to infinity
               let mvsToInf = S.foldr M.delete currCxt allMvs
-              sensmap %= \_ -> M.alter (const sensIn) _out mvsToInf
+              sensmap %= \_ -> M.alter (const (if extraSensSrcs then Nothing else sensIn)) _out mvsToInf
               allow_branch %= const False
               return (0, 0)
         return $ defaultCInfo & shape_info .~ shapeInfo

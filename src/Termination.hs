@@ -165,6 +165,14 @@ instance TerminationCheck (Expr :&: Position) where
     shapeInfo <- projShapeCheck c
     return $ TerminationInfo shapeInfo ((&&) <$> linfo ^. terminates <*> rinfo ^. terminates) []
 
+  terminationCheck c@(EFst info :&: _) = do
+    shapeInfo <- projShapeCheck c
+    return $ TerminationInfo shapeInfo (info ^. terminates) []
+
+  terminationCheck c@(ESnd info :&: _) = do
+    shapeInfo <- projShapeCheck c
+    return $ TerminationInfo shapeInfo (info ^. terminates) []
+
 instance TerminationCheck (Cmd :&: Position) where
   terminationCheck c@(CAssign linfo rinfo :&: _) = do
     shapeInfo <- projShapeCheck c
