@@ -4,7 +4,7 @@ db_partitions:[1.0] { ({ [ float(785) ] }, [float(785)]) };
 db1_partitions:     { ({ [ float(786) ] }, [float(785)]) };
 
 /* the gradients computed from each row in each partition */
-dws_partitions : { { [float(785)] } };
+dws_partitions : { ({ [float(785)] }, [float(785)]) };
 /* model parameters for each partition */
 ws_partitions : { [ float(785)] };
 
@@ -27,7 +27,10 @@ tt_db  :   [ float(785) ];
 tt_db1 :   [ float(786) ];
 
 /* aux variables for computing gradients */
-t_dws    : { [float(785)] };
+t_dws     : ({ [float(785)] }, [float(785)]);
+t_dws_fst : { [float(785)] };
+t_dws_snd : [float(785)];
+
 tt_dws   :   [float(785)];
 t_ws     :   [float(785)];
 t_dws_j  : {  float       };
@@ -113,7 +116,7 @@ bmap(db_partitions, db1_partitions, t_db, i, t_db1,
 bmap(db1_partitions, dws_partitions, t_db1, i, t_dws,
   t_db1_fst = fst(t_db1);
 
-  bmap(t_db1_fst, t_dws, tt_db1, j, tt_dws,
+  bmap(t_db1_fst, t_dws_fst, tt_db1, j, tt_dws,
     /* reset mvs so we don't depend on their values */
     tt_dws = zero_785;
     k = 0;
@@ -134,6 +137,9 @@ bmap(db1_partitions, dws_partitions, t_db1, i, t_dws,
     sc = 0.0;
   );
 
+  fst(t_dws) = t_dws_fst;
+  snd(t_dws) = snd(t_db1);
+
   tt_db1 = zero_786;
   tt_dws = zero_785;
   j      = 0;
@@ -143,20 +149,22 @@ bmap(db1_partitions, dws_partitions, t_db1, i, t_dws,
   prob   = 0.0;
   sc     = 0.0;
   t_db1_fst = {};
+  t_dws_fst = {};
 );
 
 /* compute new weights for each partition */
 bmap(dws_partitions, ws_partitions, t_dws, i, t_ws,
   j    = 0;
   t_ws = zero_785;
-  size = fc(length(t_dws));
+  size = fc(length(fst(t_dws)));
+  t_dws_fst = fst(t_dws);
 
   repeat(j, 785,
     sum = 0.0;
-    bmap(t_dws, t_dws_j, tt_dws, k, tt_dws_j, tt_dws_j = tt_dws[j]);
+    bmap(t_dws_fst, t_dws_j, tt_dws, k, tt_dws_j, tt_dws_j = tt_dws[j]);
     bsum(t_dws_j, sum, k, tt_dws_j, 1000000.0);
 
-    t_ws[j] = w[j] + (sum / size - 2.0 * lamb * w[j]) * rate;
+    t_ws[j] = (snd(t_dws))[j] + (sum / size - 2.0 * lamb * (snd(t_dws))[j]) * rate;
   );
 
   t_dws_j  = {};
@@ -166,4 +174,5 @@ bmap(dws_partitions, ws_partitions, t_dws, i, t_ws,
   j = 0;
   sum = 0.0;
   size = 0.0;
+  t_dws_fst = {};
 );

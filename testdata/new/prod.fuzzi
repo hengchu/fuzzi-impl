@@ -1,0 +1,16 @@
+types
+x :[1.0] { (int, float) };
+y : { (float, int) };
+
+i : int;
+x_in : (int, float);
+y_out : (float, int);
+
+fi_zero : (float, int);
+end
+
+bmap(x, y, x_in, i, y_out,
+  y_out      = fi_zero;
+  fst(y_out) = snd(x_in);
+  snd(y_out) = fst(x_in);
+);

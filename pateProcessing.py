@@ -27,19 +27,34 @@ binary_labels = [labels[i] for i in all_indices]
 binary_labels = [binary_labels[i]*2.0 - 1 for i in range(len(binary_labels))]
 images_with_labels = [binary_images[i] + [binary_labels[i]] for i in range(TRAINING_EXAMPLES + TEST_EXAMPLES)]
 
+print(len(images_with_labels))
+
 partitions = []
+w = [0.0] * 785
 for i in range(PARTITIONS):
-    partitions.append([])
+    partitions.append([[], w])
 
 for i in range(TRAINING_EXAMPLES):
     img = images_with_labels[i]
     p_idx = random.randrange(PARTITIONS)
-    partitions[p_idx].append(img)
+    partitions[p_idx][0].append(img)
+
+models = []
+
+trained_pate_file = open('testdata/pate.json', 'r')
+trained_data = json.load(trained_pate_file)
+for p in trained_data['db_partitions']:
+    models.append(p[1])
+trained_pate_file.close()
+
+data_test = {}
+data_test['db_test'] = images_with_labels[TRAINING_EXAMPLES:TRAINING_EXAMPLES + TEST_EXAMPLES]
+data_test['models'] = models
+with open('testdata/pate_test.json', 'w') as outfile:
+    outfile.write(json.dumps(data_test, indent=2))
 
 data = {}
-
 data['db_partitions'] = partitions
-
 data_json_str = json.dumps(data, indent=2)
 with open('testdata/pate.json', 'w') as outfile:
     outfile.write(data_json_str)

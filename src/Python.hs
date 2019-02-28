@@ -201,8 +201,9 @@ instance Pythonify (Expr :&: Position) where
                                & shape .~ spinfo
 
 tauNeedsCopy :: Tau -> Bool
-tauNeedsCopy (TArr _ _) = True
-tauNeedsCopy (TBag _)   = True
+tauNeedsCopy (TArr _ _)  = True
+tauNeedsCopy (TBag _)    = True
+tauNeedsCopy (TProd _ _) = True
 tauNeedsCopy _ = False
 
 isTauNumericArray' :: Bool -> Tau -> Bool

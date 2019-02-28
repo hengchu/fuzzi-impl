@@ -1,0 +1,41 @@
+types
+
+z  :[1.0] {[int(100)]};
+zz :      {[int(101)]};
+x  :  [int(100)];
+y  :  [int(101)];
+
+zzz : {int};
+yy : int;
+
+zero_101 : [int(101)];
+
+i : int;
+j : int;
+
+end
+
+/* should fail type check
+bmap(z, zz, x, i, y,
+  j = 0;
+  while j < 100 do
+    y[j + 1] = x[j]
+  end;
+  j = 0;
+);
+*/
+
+bmap(z, zz, x, i, y,
+  j = 0;
+  y = zero_101;
+  repeat(j, 100,
+    y[j+1] = x[j];
+  );
+  j = 0;
+);
+
+j = 0;
+repeat(j, 100,
+  i = 0; y = zero_101; yy = 0;
+  bmap(zz, zzz, y, i, yy, yy = y[j]);
+);
