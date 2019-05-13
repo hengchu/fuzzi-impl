@@ -1,5 +1,14 @@
 {-# OPTIONS_GHC -Wno-missing-signatures -Wno-orphans #-}
 
+-- |The 'SyntaxExt' module implements the data types that represent Fuzzi
+-- terms. Since Fuzzi has a few slightly different variations that represent
+-- terms in different stages of the typechecking process, we use the 'compdata'
+-- package to implement these terms as extensible sums in order to reduce
+-- redundant code.
+--
+-- That is why all term types are 'Functor's. These 'Functor's are then supplied
+-- to the 'compdata''s 'Term' type constructor to produce a type-level fixpoint,
+-- whose values are Fuzzi terms.
 module SyntaxExt where
 
 import Control.Lens
@@ -16,49 +25,76 @@ import Data.Comp.Equality ()
 import Data.Comp.Derive
 import Data.Comp.Variables
 
+-- |Variables are just 'String's in this implementation.
 type Var = String
 
-data Tau = TInt
-         | TFloat
-         | TBool
-         | TAny
-         | TProd Tau Tau
-         | TArr { _tau_ty :: Tau, _tau_fixed_length :: (Maybe Int) }
-         | TBag { _tau_ty :: Tau }
-         deriving (Show, Eq)
+-- |Fuzzi types.
+data Tau
+  -- |Fuzzi int
+  = TInt
+  -- |Fuzzi float
+  | TFloat
+  -- |Fuzzi boolean
+  | TBool
+  -- |A top type that is only used in typechecking for assigning temporary types
+  -- to empty array literals
+  | TAny
+  -- |Fuzzi products
+  | TProd Tau Tau
+  -- |Fuzzi arrays. Arrays can be of a fixed length.
+  | TArr { _tau_ty :: Tau, _tau_fixed_length :: (Maybe Int) }
+  -- |Fuzzi bags
+  | TBag { _tau_ty :: Tau }
+  deriving (Show, Eq)
 
 $(makeLensesWith underscoreFields ''Tau)
 
+-- |A Fuzzi type declaration contains a variable, its sensitivity and its type.
 data Decl = Decl Position Var Float Tau
   deriving (Show, Eq)
 
-
+-- |Binary operators in Fuzzi.
 data Binop = LT | LE | GT | GE | AND | OR | EQ | NEQ | PLUS | MINUS | MULT | DIV
   deriving (Show, Eq, Ord, Enum, Bounded)
 
 type Line   = Int
 type Column = Int
 
+-- |Another source position type. This is only used to remove dependency on the
+-- lexer in this module.
 data Position = Position Line Column
   deriving (Show, Eq, Ord)
 
+-- |The 'C' type is only used as a type-level index in the 'ExtVar' type to denote
+-- extension variables that can only be substituted with commands.
 data C = C deriving (Typeable, Show, Eq)
+
+-- |The 'E' type is only used as a type-level index in the 'ExtVar' type to denote
+-- extension variables that can only be substituted with expressions.
 data E = E deriving (Typeable, Show, Eq)
 
+-- |An indexed type for extension variables.
 data ExtVar :: * -> * -> * where
   CExtVar :: Var -> ExtVar C a
   EExtVar :: Var -> ExtVar E a
 
+-- |'AnyExtVar' hides the type-level index. A value of this type can hold either
+-- a 'C' extension variable or an 'E' extension variable.
 data AnyExtVar :: * where
   AnyExtVar :: (Typeable s) => ExtVar s a -> AnyExtVar
 
+-- |A function that tests whether two extension variables are of the same sort,
+-- and produces evidence that can be used to refine the equality when 's' and
+-- 's'' are indeed equal.
 eqVarSort :: forall s s' a a'. (Typeable s, Typeable s')
           => ExtVar s a -> ExtVar s' a' -> Maybe (s :~: s')
 eqVarSort _ _ = eqT @s @s'
 
+-- |Wraps an 'E' extension variable.
 anyExprVar :: Var -> AnyExtVar
 anyExprVar = AnyExtVar . EExtVar
 
+-- |Wraps a 'C' extension variable.
 anyCmdVar :: Var -> AnyExtVar
 anyCmdVar = AnyExtVar . CExtVar
 
@@ -97,75 +133,122 @@ deriving instance Show    AnyExtVar
 instance (EqF f, Eq a) => EqF (f :&: a) where
   eqF (f1 :&: a1) (f2 :&: a2) = eqF f1 f2 && a1 == a2
 
-data Lit e = LInt Int
-           | LFloat Float
-           | LBool Bool
-           | LArr [e]
-           | LBag [e]
+-- |Fuzzi literals.
+data Lit e
+  -- |A literal int
+  = LInt Int
+  -- |A literal float
+  | LFloat Float
+  -- |A literal boolean
+  | LBool Bool
+  -- |A literal array
+  | LArr [e]
+  -- |A literal bag
+  | LBag [e]
   deriving (Functor, Show, Eq, Foldable, Traversable)
 
-data Expr e = EVar Var
-            | ELength e
-            | ELit (Lit e)
-            | EBinop Binop e e
-            | EIndex e e
-            | EFloat e
-            | EExp e
-            | ELog e
-            | EClip e (Lit e)
-            | EScale e e
-            | EDot e e
-            | EFst e
-            | ESnd e
-            deriving Functor
+-- |Fuzzi expressions.
+data Expr e
+  -- |A variable
+  = EVar Var
+  -- |A length expression
+  | ELength e
+  -- |A Fuzzi literal
+  | ELit (Lit e)
+  -- |A binary operation
+  | EBinop Binop e e
+  -- |An index operation
+  | EIndex e e
+  -- |An int-to-float cast operation
+  | EFloat e
+  -- |A natural exponentiation operation
+  | EExp e
+  -- |A natural log operation
+  | ELog e
+  -- |A clip operation
+  | EClip e (Lit e)
+  -- |A scale operation
+  | EScale e e
+  -- |A dot product operation
+  | EDot e e
+  -- |Projection of first field from a product
+  | EFst e
+  -- |Projection of second field from a product
+  | ESnd e
+  deriving Functor
 
+-- |Fuzzi expression annotated with 'Position'
 type ExprP  = Expr :&: Position
 
+-- |Fuzzi expression extended with extension variables
 type Expr'  = ExtVar E :+: Expr
+
+-- |Fuzzi expression extended with extension variables and annotated with 'Position'
 type ExprP' = (ExtVar E :&: Position) :+: Expr :&: Position
 
 $(derive [makeTraversable, makeFoldable, makeEqF,
           makeShowF, smartConstructors, smartAConstructors]
          [''Expr, ''ExtVar])
 
-data Cmd c = CAssign c c
-           | CLaplace c Float c
-           | CIf c c c
-           | CWhile c c
-           | CSeq c c
-           | CSkip
-           deriving Functor
+-- |Fuzzi commands
+data Cmd c
+  -- |Assignment
+  = CAssign c c
+  -- |Laplace sampling
+  | CLaplace c Float c
+  -- |Conditional branching
+  | CIf c c c
+  -- |While loops
+  | CWhile c c
+  -- |Sequence of commands
+  | CSeq c c
+  -- |No-op skip command
+  | CSkip
+  deriving Functor
 
+-- |Fuzzi command annotated with 'Position'
 type CmdP = Cmd :&: Position
 
+-- |Fuzzi command to invoke an extension.
 data CExt c = CExt String [c]
   deriving (Functor)
+
+-- |Fuzzi extension declaration.
 data CExtDecl c = CExtDecl String [AnyExtVar] c
   deriving (Functor)
+
+-- |Fuzzi typechecker hints: this is only used in typechecking to provide
+-- provenance on expanded code.
 data CTCHint c = CTCHint String [c] c
   deriving (Functor)
 
--- The language where extension definition is not allowed, but extension
+-- |The Fuzzi variant where extension definition is not allowed, but extension
 -- application is possible
 type Cmd'  = ExtVar C
            :+: CExt
            :+: Cmd
+
+-- |Same as 'Cmd'' but annotated with 'Position'.
 type CmdP' =   (ExtVar C :&: Position)
            :+: (CExt     :&: Position)
            :+: (Cmd      :&: Position)
 
--- The language for advanced users who want to define their own extensions
+-- |The Fuzzi variant for advanced users who want to define their own extensions
 type Cmd''  =   ExtVar C
             :+: CExt
             :+: CExtDecl
             :+: Cmd
+
+-- |Same as 'Cmd''' but annotated with 'Position'.
 type CmdP'' =   (ExtVar C :&: Position)
             :+: (CExt     :&: Position)
             :+: (CExtDecl :&: Position)
             :+: (Cmd      :&: Position)
 
--- The vanilla IMP language
+-- |The vanilla IMP language
 type Imp  =   Expr :+: Cmd
+
+-- |Same as 'Imp' but annotated with 'Position'.
 type ImpP =   Expr :&: Position
           :+: Cmd  :&: Position
 
@@ -175,6 +258,8 @@ type Imp'  =   ExtVar E
            :+: ExtVar C
            :+: CExt
            :+: Cmd
+
+-- |Same as 'Imp'' but annotated with 'Position'
 type ImpP' =   ExtVar E :&: Position
            :+: Expr     :&: Position
            :+: ExtVar C :&: Position
@@ -188,6 +273,8 @@ type Imp''  =   ExtVar E
             :+: CExt
             :+: CExtDecl
             :+: Cmd
+
+-- |Same as 'Imp''' but annotated with 'Position'
 type ImpP'' =   ExtVar E :&: Position
             :+: Expr     :&: Position
             :+: ExtVar C :&: Position
@@ -201,6 +288,9 @@ type ImpTC   =   Expr
              :+: Cmd
              :+: CTCHint
 
+-- |This is an intermediate representation of Fuzzi programs. Used during the
+-- extension expansion process, where not all extension variables have been
+-- substituted yet.
 type ImpTC'  =   ExtVar E
              :+: Expr
              :+: ExtVar C
@@ -208,10 +298,12 @@ type ImpTC'  =   ExtVar E
              :+: Cmd
              :+: CTCHint
 
+-- |Same as 'ImpTC' but annotated with 'Position'.
 type ImpTCP  =   Expr     :&: Position
              :+: Cmd      :&: Position
              :+: CTCHint  :&: Position
 
+-- |Same as 'ImpTC'' but annotated with 'Position'.
 type ImpTCP' =   ExtVar E :&: Position
              :+: Expr     :&: Position
              :+: ExtVar C :&: Position
@@ -223,14 +315,23 @@ $(derive [makeTraversable, makeFoldable, makeEqF, makeShowF,
           smartConstructors, smartAConstructors]
          [''Cmd, ''CExt, ''CExtDecl, ''CTCHint])
 
+-- |A Fuzzi program contains a list of type declarations, and the program term.
+--
+-- The 'Term' type constructor is provided by 'compdata', which takes a functor
+-- and builds a fixpoint of that functor. Here the fixpoint of the 'ImpP'''
+-- functor is the type that represents Fuzzi program terms.
 data Prog = Prog {
   prog_decls :: [Decl]
   , prog_cmd :: Term ImpP''
   } deriving (Show, Eq)
 
+-- |The computed sort of a Fuzzi term.
 data SyntaxSort = Expression | Command
   deriving (Show, Eq, Ord)
 
+-- |'Wellformed' implements a basic syntax sort checking procedure that rules
+-- out invalid programs that, for example, applies a binary operation between
+-- two commands.
 class Wellformed f where
   syntaxSort :: AlgM Maybe f SyntaxSort
 
@@ -334,30 +435,44 @@ instance HasVars CExtDecl AnyExtVar where
   bindsVars (CExtDecl _ vars c) =
     c |-> S.fromList vars
 
+-- |Extracts the starting 'Position' from a command
 cmd2Position :: Term ImpP'' -> Position
 cmd2Position c = snd . (projectA @Imp'') . unTerm $ c
 
+-- |Extracts the starting 'Position' from an expression
 expr2Position :: Term ExprP' -> Position
 expr2Position e = snd . (projectA @Expr') . unTerm $ e
 
--- A map from extension name to the list of bound variables, and the body of the
--- extension
+-- |A map from extension name to the list of bound variables, and the body of
+-- the extension
 type ExtensionLibrary = M.Map String ([AnyExtVar], Term ImpP')
 
-data ExpandError = UnknownExtension Position String
-                 | MismatchingNumberOfParams Position Int Int -- num bvs, num params
+-- |Errors that can result from the expansion process.
+data ExpandError
+  -- |When an unknown extension is used, an error containing the source location
+  -- and its name is reported
+  = UnknownExtension Position String
+  -- |When an extension is supplied an incorrect number of parameters, an error
+  -- containing its position, expected number of params, and supplied number of
+  -- params are reported
+  | MismatchingNumberOfParams Position Int Int -- num bvs, num params
                  deriving (Show, Eq, Ord)
 
+-- |Expand all extensions in an Fuzzi term given the 'ExtensionLibrary'.
 expand :: ExtensionLibrary -> Term ImpP' -> Either [ExpandError] (Term ImpTCP')
 expand lib c =
   case runWriter (expand' lib c) of
     (c', [])  -> Right c'
     (_, errs) -> Left errs
 
+-- |The workhorse behind 'expand'
 expand' :: (MonadWriter [ExpandError] m)
         => ExtensionLibrary -> Term ImpP' -> m (Term ImpTCP')
 expand' lib c = cataM (expandAlg lib) c
 
+-- |The 'Expand' class implements a monadic f-algebra that performs the
+-- extension expansion. The algebra is then passed to the 'cataM' operator
+-- provided by 'compdata' to be folded over the entire term.
 class Expand f where
   expandAlg :: (MonadWriter [ExpandError] m)
             => ExtensionLibrary -> AlgM m f (Term ImpTCP')
@@ -389,13 +504,23 @@ instance Expand (CExt :&: Position) where
               (MismatchingNumberOfParams p (length bvs) (length params))
               (return . inject $ c)
 
+-- |A shorthand function for reporting errors in a writer monad.
 reportError :: (MonadWriter [e] m) => e -> m a -> m a
 reportError e m = tell [e] >> m
 
-data RemoveCExtDeclError = NestedExtensionDeclaration Position String
-                         | DuplicateExtensionDeclaration Position String
+-- |Errors that can result from the process of separating extension declaration
+-- from Fuzzi program.
+data RemoveCExtDeclError
+  -- |Nested extension declarations are not allowed
+  = NestedExtensionDeclaration Position String
+  -- |Multiple extensions with the same name are not allowed
+  | DuplicateExtensionDeclaration Position String
   deriving (Show, Eq, Ord)
 
+-- |The 'RemoveCExtDecl' class implements a monadic homomorphism that strips
+-- extension declarations from a Fuzzi term. The homomorphism is then supplied
+-- to the 'appHomM' operator from 'compdata' to be applied structurally
+-- throughout a Fuzzi term.
 class RemoveCExtDecl f g where
   removeCExtDeclHom :: (MonadError RemoveCExtDeclError m) => HomM m f g
 
@@ -409,9 +534,12 @@ instance
   (Cmd :&: Position :<: g) => RemoveCExtDecl (CExtDecl :&: Position) g where
   removeCExtDeclHom (CExtDecl _ _ _ :&: p) = return $ inject (CSkip :&: p)
 
+-- |Removes extension declarations from a Fuzzi term.
 removeCExtDecl'' :: Term ImpP'' -> Either RemoveCExtDeclError (Term ImpP')
 removeCExtDecl'' t = appHomM removeCExtDeclHom t
 
+-- |The 'CollectCExtDecl' class implements a monadic f-algebra that collects all
+-- extensions declarations in a Fuzzi term into an 'ExtensionLibrary'.
 class CollectCExtDecl f where
   collectCExtDecl :: ( MonadWriter [RemoveCExtDeclError] m
                      , MonadState ExtensionLibrary m)
@@ -419,6 +547,7 @@ class CollectCExtDecl f where
 
 $(derive [liftSum] [''CollectCExtDecl])
 
+-- |Gathers all extension declaration as an 'ExtensionLibrary'
 getExtensionLibrary :: Term ImpP'' -> Either [RemoveCExtDeclError] ExtensionLibrary
 getExtensionLibrary t =
   case runWriter $ execStateT (cataM collectCExtDecl t) M.empty of
@@ -447,12 +576,16 @@ instance CollectCExtDecl (CExtDecl :&: Position) where
               (NestedExtensionDeclaration p name)
               (return $ inject c)
 
-data DesugarError = RemoveCExtE [RemoveCExtDeclError]
-                  | ExpandE [ExpandError]
-                  | FreeExtensionVariable Position Var
-                  | UnexpandedCExt Position String
-                  deriving (Show, Eq, Ord)
+-- |A type that is the sum of all different kinds of errors that may appear in
+-- the preprocessing phase of a Fuzzi program
+data DesugarError
+  = RemoveCExtE [RemoveCExtDeclError]
+  | ExpandE [ExpandError]
+  | FreeExtensionVariable Position Var
+  | UnexpandedCExt Position String
+  deriving (Show, Eq, Ord)
 
+-- |Workhorse behind 'desugarExtensions'
 desugarExtensions' :: ExtensionLibrary -> Term ImpP'' -> Either DesugarError (Term ImpTCP)
 desugarExtensions' lib t =
   let extensionLib = getExtensionLibrary t
@@ -465,9 +598,13 @@ desugarExtensions' lib t =
            Left e -> Left $ ExpandE e
            Right t'' -> runExcept $ cataM verifyNoCExt t''
 
+-- |Removes all extension declarations, expands all extension, and verify there
+-- are no more free extension variable and unexpanded extensions.
 desugarExtensions :: Term ImpP'' -> Either DesugarError (Term ImpTCP)
 desugarExtensions t = desugarExtensions' M.empty t
 
+-- |The 'VerifyNoCExt' class implements an f-algebra that verifies there are no
+-- more free extension variables and unexpanded extensions left.
 class VerifyNoCExt f where
   verifyNoCExt :: (MonadError DesugarError m) => AlgM m f (Term ImpTCP)
 
@@ -484,30 +621,35 @@ instance VerifyNoCExt (ExtVar s :&: Position) where
 instance VerifyNoCExt (CExt :&: Position) where
   verifyNoCExt (CExt name _ :&: p) = throwError $ UnexpandedCExt p name
 
+-- |Extract a variable from a Fuzzi term.
 projectEVar :: Term ImpTCP -> Maybe Var
 projectEVar t =
   case project @ExprP t of
     Just (EVar x :&: _) -> Just x
     _ -> Nothing
 
+-- |Extract an integer literal from a Fuzzi term.
 projectELInt :: Term ImpTCP -> Maybe Int
 projectELInt t =
   case project @ExprP t of
     Just (ELit (LInt v) :&: _) -> Just v
     _ -> Nothing
 
+-- |Extracts a float literal from a Fuzzi term.
 projectELFloat :: Term ImpTCP -> Maybe Float
 projectELFloat t =
   case project @ExprP t of
     Just (ELit (LFloat v) :&: _) -> Just v
     _ -> Nothing
 
+-- |Extracts the argument to a Fuzzi length operator.
 projectELength :: Term ImpTCP -> Maybe (Term ImpTCP)
 projectELength t =
   case project @ExprP t of
     Just (ELength e :&: _) -> Just e
     _ -> Nothing
 
+-- |Extracts the name of an extension from a Fuzzi typechecker hint term.
 projectExtName :: Term ImpTCP -> Maybe String
 projectExtName t =
   case project @(CTCHint :&: Position) t of

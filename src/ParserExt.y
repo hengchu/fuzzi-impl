@@ -2,7 +2,21 @@
 
 {-# OPTIONS_GHC -Wno-unused-imports #-}
 
-module ParserExt where
+-- |'ParserExt' implements the parser for Fuzzi.
+module ParserExt (
+  -- * Parser functions
+  -- ** Parse all possible Fuzzi commands
+  parseCmd
+  -- ** Parse all possible Fuzzi expressions
+  , parseExpr
+  -- ** Parse a Fuzzi extension library file
+  , parseExtLib
+  -- ** Parse a Fuzzi program
+  , parseProg
+  -- * Invoking parsers
+  -- ** Use 'parse' with any parser function to invoke it
+  , parse
+) where
 
 import Data.Foldable
 import qualified Data.Set as S
@@ -434,6 +448,7 @@ getFloat :: Token -> Parser Float
 getFloat (TFloat _ v) = return v
 getFloat t = failWithMsg $ "Expecting a TFloat, position = " ++ show (getAlexPosn t) ++ ", got = " ++ show t
 
+-- |A shorthand function for invoking a parser 'p'.
 parse :: ([Token] -> Parser a) -> String -> Either String a
 parse p input = do
   tokens <- runAlex input scanTokens

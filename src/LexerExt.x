@@ -1,6 +1,19 @@
 {
-
-module LexerExt where
+-- |'LexerExt' implements a lexer for Fuzzi using Alex.
+module LexerExt (
+  -- * Functions
+  -- ** The monadic lexer action
+  scanTokens
+  -- ** Extract source position from a token
+  , getAlexPosn
+  -- ** Invoke the lexer monad
+  , runAlex
+  -- * Types
+  -- ** Tokens of Fuzzi
+  , Token(..)
+  -- ** Generated type from Alex that holds source positions
+  , AlexPosn(..)
+) where
 
 import Control.Lens
 import GHC.Generics
@@ -84,7 +97,8 @@ tokens :-
 <0>@number                       { int }
 
 {
-
+-- | Values of type 'Token' represent all possible tokens in the Fuzzi language.
+-- Each token contains its source position.
 data Token = TIdent     AlexPosn String
            | TInt       AlexPosn Int
            | TFloat     AlexPosn Float
@@ -142,24 +156,31 @@ data Token = TIdent     AlexPosn String
            | TEOF       AlexPosn
   deriving (Generic, Show, Eq)
 
+-- |Returns the source position of the token.
 getAlexPosn :: Token -> AlexPosn
 getAlexPosn tok = tok ^. (typed @AlexPosn)
 
+-- |A utility function for building a monad token parsing action.
 tokAct :: (AlexPosn -> String -> Token) -> AlexInput -> Int -> Alex Token
 tokAct f (p, _, _, s) _ = return $ f p s
 
+-- |A shorthand action for parsing identifier tokens.
 ident :: AlexInput -> Int -> Alex Token
 ident (p, _, _, s) len = return $ TIdent p (take len s)
 
+-- |A shorthand action for parsing floating point numbers.
 float :: AlexInput -> Int -> Alex Token
 float (p, _, _, s) len = return $ TFloat p (read $ take len s)
 
+-- |A shorthand action for parsing integers.
 int :: AlexInput -> Int -> Alex Token
 int (p, _, _, s) len = return $ TInt p (read $ take len s)
 
+-- |A shorthand action for EOF.
 alexEOF :: Alex Token
 alexEOF = return $ TEOF (AlexPn 0 0 0)
 
+-- |Invoke the actual lexer and appends the result to the accumulator.
 scanTokens' :: [Token] -> Alex [Token]
 scanTokens' acc = do
   t <- alexMonadScan
@@ -167,6 +188,7 @@ scanTokens' acc = do
     TEOF _ -> return . reverse $ acc
     _      -> scanTokens' (t:acc)
 
+-- |Wraps 'scanTokens'' and starts the lexer with an empty accumulator.
 scanTokens :: Alex [Token]
 scanTokens = scanTokens' []
 }
