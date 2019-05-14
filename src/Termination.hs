@@ -1,3 +1,4 @@
+-- |This module provides f-algebra that implements the termination checker.
 module Termination where
 
 import qualified Data.Map as M
@@ -16,6 +17,9 @@ import Control.Monad.State
 
 import Debug.Trace
 
+-- |The termination information of a Fuzzi term contains its shape information,
+-- whether it terminates, and a list of extensions used in the term (useful in
+-- the final stage that zips together all of the checkers).
 data TerminationInfo m =
   TerminationInfo {
   _terminationinfo_shape_info :: ShapeInfo
@@ -26,10 +30,14 @@ data TerminationInfo m =
 $(makeLensesWith underscoreFields ''TerminationInfo)
 $(makePrisms ''TerminationInfo)
 
-data TerminationCheckError = InternalError Position String
-                           | InvalidExtensionArgs Position
+-- |Errors that may result from checking termination.
+data TerminationCheckError =
+  InternalError Position String
+  | InvalidExtensionArgs Position
   deriving (Show, Typeable, Eq)
 
+-- |A constant folding context to aid termination checking. It maps variables to
+-- its statically known int values (if this variable has such a value).
 data TerminationCxt = TerminationCxt {
   _terminationcxt_static_values :: M.Map Var Int
   } deriving (Show, Eq)
@@ -38,6 +46,7 @@ $(makeLensesWith underscoreFields ''TerminationCxt)
 
 instance Exception TerminationCheckError
 
+-- |Calls shapechecker and return shape information of this program fragment.
 projShapeCheck :: ( MonadThrow m
                   , MonadReader ShapeCxt m
                   , MonadCont m
@@ -48,6 +57,7 @@ projShapeCheck :: ( MonadThrow m
 projShapeCheck fa =
   shapeCheck (fmap (view shape_info) fa)
 
+-- |Constant folding of int values.
 hasStaticIntValue :: ( MonadThrow m
                      , MonadReader ShapeCxt m
                      , MonadState  TerminationCxt  m
@@ -82,6 +92,8 @@ hasStaticIntValue e =
             _ -> return Nothing
     Nothing -> return Nothing
 
+-- |'TerminationCheck' provides the f-algebra that computes termination
+-- information.
 class TerminationCheck f where
   terminationCheck :: ( MonadThrow m
                       , MonadReader ShapeCxt m

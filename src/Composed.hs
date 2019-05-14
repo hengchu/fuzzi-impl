@@ -1,3 +1,6 @@
+-- |This module implements the composed checker that "zips" together the
+-- speculative sensitivity checker, the affine checker and the termination
+-- checker.
 module Composed where
 
 import qualified Data.Map as M
@@ -21,6 +24,8 @@ import Control.Monad.Catch
 
 import Debug.Trace
 
+-- |'ComposedInfo' collects information from all 3 checkers and lump them into a
+-- single value.
 data ComposedInfo m =
   ComposedInfo {
   _composedinfo_specsens :: SpecSensInfo (StateT SensCxt m)
@@ -30,13 +35,17 @@ data ComposedInfo m =
 
 $(makeLensesWith underscoreFields ''ComposedInfo)
 
-data ComposedCheckInfo = MapBodyMayNotTerminate Position
-                       | MapBodyIsNotAffine Position
-                       | AdvCompBodyMayNotTerminate Position
+-- |Errors that may result from composition. This is in addition to each of the
+-- possible errors that may be thrown by the sub checkers.
+data ComposedCheckInfo
+  = MapBodyMayNotTerminate Position
+  | MapBodyIsNotAffine Position
+  | AdvCompBodyMayNotTerminate Position
   deriving (Show, Eq, Typeable)
 
 instance Exception ComposedCheckInfo
 
+-- |Calls sensitivity checker on the program fragment.
 projSensCheck :: ( MonadThrow m
                  , MonadCont m
                  , Functor f
@@ -45,6 +54,7 @@ projSensCheck :: ( MonadThrow m
               => f (ComposedInfo m) -> m (SpecSensInfo (StateT SensCxt m))
 projSensCheck fa = specSensCheck (fmap (view specsens) fa)
 
+-- |Calls affine checker on the program fragment.
 projAffineCheck :: ( MonadReader ShapeCxt m
                    , MonadCont m
                    , MonadThrow m
@@ -54,6 +64,7 @@ projAffineCheck :: ( MonadReader ShapeCxt m
                 -> m AffineInfo
 projAffineCheck fa = affineCheck (fmap (view affineinfo) fa)
 
+-- |Calls termination checker on the program fragment.
 projTermCheck :: ( MonadReader ShapeCxt m
                  , MonadCont m
                  , MonadThrow m
@@ -71,12 +82,14 @@ class ComposedCheck f where
 
 $(derive [liftSum] [''ComposedCheck])
 
+-- |The free composition of the provided type information.
 freeComp :: (Monad m)
          => (SpecSensInfo (StateT SensCxt m),
              AffineInfo,
              TerminationInfo m) -> m (ComposedInfo m)
 freeComp (v1, v2, v3) = return $ ComposedInfo v1 v2 v3
 
+-- |Straightforward decomposition of the provided type information.
 decomp :: (Monad m)
        => ComposedInfo m
        -> m (SpecSensInfo (StateT SensCxt m),
@@ -168,6 +181,8 @@ instance ComposedCheck (CTCHint :&: Position) where
 
     return $ ComposedInfo specsensInfo affineInfo termInfo
 
+-- |Convenient function to run the composed type checker given a starting shape
+-- context and sensitivity context.
 runComposedChecker :: ShapeCxt -> SensCxt -> Term ImpTCP -> Either SomeException (SensCxt, Eps, Delta)
 runComposedChecker shapeCxt sensCxt cmd = run $ do
   let (_, p) = projectA @ImpTC @Position (unTerm cmd)

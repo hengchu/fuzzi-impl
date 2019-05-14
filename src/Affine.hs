@@ -1,3 +1,5 @@
+-- |This module provides checkers for deciding whether commands have linearly
+-- scalable sensitivity properties.
 module Affine where
 
 import Data.Typeable
@@ -11,6 +13,9 @@ import Control.Monad.Reader
 import Control.Monad.Catch
 import Control.Monad.Cont
 
+-- |For commands, 'AffineInfo' is a boolean of whether the command satisfy
+-- linear scaling property of sensitivities, and its shape info. For
+-- expressions, it is just its shape info.
 data AffineInfo =
   EAffineInfo {
   _affineinfo_shape_info :: ShapeInfo
@@ -23,11 +28,13 @@ data AffineInfo =
 $(makeLensesWith underscoreFields ''AffineInfo)
 $(makePrisms ''AffineInfo)
 
+-- |Errors that may result from the affine checker.
 data AffineCheckError = InternalError Position String
   deriving (Show, Typeable, Eq)
 
 instance Exception AffineCheckError
 
+-- |Runs shape checker and returns the program fragment's shape information.
 projShapeCheck :: ( MonadThrow m
                   , MonadReader ShapeCxt m
                   , MonadCont m
@@ -44,6 +51,9 @@ projShapeCheck fa =
 --       {k G1} c {k G2, (0, 0)} also holds
 -- this is true for simple straight light programs + while loops
 -- extensions are case specific
+
+-- |'AffineCheck' typeclass provides the f-algebra for determining the linear
+-- scalable sensitivity properties of Fuzzi programs.
 class AffineCheck f where
   affineCheck :: (MonadThrow m, MonadReader ShapeCxt m, MonadCont m) => AlgM m f AffineInfo
 

@@ -1,3 +1,5 @@
+-- |'Shape' implements the shapechecker as an f-algebra to be folded over the
+-- syntax tree.
 module Shape where
 
 import Data.Typeable
@@ -16,25 +18,34 @@ import Control.Monad.Cont
 import Control.Monad.Catch
 import Control.Monad.Reader
 
-data ShapeCheckError = ExpectTau       Position Tau Tau -- expected type, got type
-                     | ExpectProd      Position Tau     -- expected prod, got type
-                     | ExpectArr       Position Tau     -- expected arrays/bags, got this type
-                     | ExpectNum       Position Tau     -- expected numeric type, got type
-                     | ExpectSmall     Position Tau     -- expected small type, got type
-                     | Mismatch        Position [Tau] [Term ImpTCP]   -- the mismatching types
-                     | UnknownVariable Position Var
-                     | ExpectExpr      Position         -- expected expression, got something else
-                     | ExpectCmd       Position         -- expected command, got something else
-                     | UnsupportedAssign Position
-                     | ExpectPositive  Position Float    -- expected positive float, got this
-                     | InternalError   Position         -- the impossible happened, a bug!
-                     deriving (Show, Eq, Typeable)
+-- |All of the errors that can result from shape checking.
+data ShapeCheckError
+  = ExpectTau       Position Tau Tau -- ^expected type, got type
+  | ExpectProd      Position Tau     -- ^expected prod, got type
+  | ExpectArr       Position Tau     -- ^expected arrays/bags, got this type
+  | ExpectNum       Position Tau     -- ^expected numeric type, got type
+  | ExpectSmall     Position Tau     -- ^expected small type, got type
+  | Mismatch        Position [Tau] [Term ImpTCP]   -- ^the mismatching types
+  | UnknownVariable Position Var     -- ^using an undeclared variable
+  | ExpectExpr      Position         -- ^expected expression, got something else
+  | ExpectCmd       Position         -- ^expected command, got something else
+  | UnsupportedAssign Position       -- ^invalid assignment forms
+  | ExpectPositive  Position Float   -- ^expected positive float, got this
+  | InternalError   Position         -- ^the impossible happened, a bug!
+  deriving (Show, Eq, Typeable)
 
 instance Exception ShapeCheckError
 
+-- |'ShapeCxt' is a map from variables to their types.
 newtype ShapeCxt = ShapeCxt { getShapeCxt :: M.Map Var Tau }
   deriving (Show, Eq)
 
+-- |'ShapeInfo' is the shape information of a piece of syntax. It can be either
+-- shape information on expression or shape information on a command.
+--
+-- For expressions, the information captures the type. For commands, the
+-- information captures the modified variables (useful in other typechecking
+-- stages).
 data ShapeInfo =
   EShapeInfo { _shapeinfo_term :: Term ImpTCP
              , _shapeinfo_tau :: Tau
@@ -47,12 +58,18 @@ data ShapeInfo =
 $(makeLensesWith underscoreFields ''ShapeInfo)
 $(makePrisms ''ShapeInfo)
 
+-- |A convenient value to be modified using operators from the 'lens' library to
+-- build expression shape information.
 defaultEInfo :: ShapeInfo
 defaultEInfo = EShapeInfo (iAELit (Position 0 0) (LInt 0)) TAny
 
+-- |A convenient value to be modified using operators from the 'lens' library to
+-- build command shape information.
 defaultCInfo :: ShapeInfo
 defaultCInfo = CShapeInfo (iACSkip (Position 0 0)) S.empty
 
+-- |The 'ShapeCheck' typeclass provides the monadic f-algebra that implements
+-- shapechecking.
 class ShapeCheck f where
   shapeCheck :: forall m.
                 ( MonadReader ShapeCxt m
@@ -223,8 +240,7 @@ instance ShapeCheck (Expr :&: Position) where
   shapeCheck (t :&: p) =
     throwM $ ExpectExpr p
 
--- is 'rt' more specific than 'lt'? really the only case is fixed length arrays,
--- it should be OK to assign [int(5)] to [int], as an example.
+-- |Checks if 'rt' is more specific than 'lt'?
 isTauCompat :: Tau -> Tau -> Bool
 isTauCompat lt rt =
   case (lt, rt) of
@@ -320,6 +336,7 @@ instance ShapeCheck (CTCHint :&: Position) where
       _ ->
         throwM $ ExpectCmd p
 
+-- |Extracts the type declarations in a Fuzzi program as a 'ShapeCxt'.
 extractShapeCxt :: Prog -> ShapeCxt
 extractShapeCxt (Prog decls _) =
   ShapeCxt $ M.fromList (map extract decls)

@@ -1,3 +1,7 @@
+-- |This module implements "speculative" sensitivity checking. The checker is
+-- speculative in the sense that there are side-conditions unchecked by this
+-- checker, and are only resolved when this checker is "zipped" together with
+-- other checkers.
 module Speculative.Sensitivity where
 
 import Data.Typeable
@@ -18,34 +22,44 @@ import qualified Shape as S
 
 import Debug.Trace
 
-data Value = VInt   Int
-           | VFloat Float
-           | VBool  Bool
-           | VArray [Value]
-           | VBag   [Value]
-           deriving (Show, Eq, Ord)
+-- |Fuzzi values, used for constant folding when checking sensitivities in some
+-- cases.
+data Value
+  = VInt   Int
+  | VFloat Float
+  | VBool  Bool
+  | VArray [Value]
+  | VBag   [Value]
+  deriving (Show, Eq, Ord)
 
-data AssignPat m = APVar Var
-                 | APLength Var
-                 | APLength2 (SpecSensInfo m)
-                 | APIndex Var (SpecSensInfo m)
+-- |Supported assignment patterns.
+data AssignPat m
+  = APVar Var
+  | APLength Var
+  | APLength2 (SpecSensInfo m)
+  | APIndex Var (SpecSensInfo m)
 
+-- |Checks if a value is an int.
 isVInt :: Value -> Maybe Int
 isVInt (VInt v) = Just v
 isVInt _ = Nothing
 
+-- |Checks if a value is a float.
 isVFloat :: Value -> Maybe Float
 isVFloat (VFloat v) = Just v
 isVFloat _ = Nothing
 
+-- |Checks if a value is a bool.
 isVBool :: Value -> Maybe Bool
 isVBool (VBool v) = Just v
 isVBool _ = Nothing
 
+-- |Checks if a value is an array.
 isVArray :: Value -> Maybe [Value]
 isVArray (VArray v) = Just v
 isVArray _ = Nothing
 
+-- |Checks if a value is a bag.
 isVBag :: Value -> Maybe [Value]
 isVBag (VBag v) = Just v
 isVBag _ = Nothing
@@ -53,12 +67,22 @@ isVBag _ = Nothing
 type Eps   = Float
 type Delta = Float
 
+-- |'SensCxt' is the sensitivity typing context in between commands. It contains
+-- a map from variables to their sensitivities, and a few auxillary values that
+-- help with constant folding.
 data SensCxt = SensCxt { _senscxt_sensmap :: M.Map Var Float
                        , _senscxt_allow_branch :: Bool
                        , _senscxt_static_values :: M.Map Var Int
                        }
   deriving (Show, Eq)
 
+-- |The speculative sensitivity information for an expression is its sensitivity
+-- (and its shape information), and the speculative sensitivity information for
+-- a command is its (epsilon, delta) privacy cost.
+--
+-- These values are, however, not actually produced, as they are wrapped in a
+-- monad 'm'. This monad 'm' provides us the flexibility to zip with other
+-- checkers in later typechecking stages.
 data SpecSensInfo m =
   ESpecSensInfo {
   _specsensinfo_sens         :: m (Maybe Float)
@@ -73,6 +97,7 @@ $(makeLensesWith underscoreFields ''SensCxt)
 $(makeLensesWith underscoreFields ''SpecSensInfo)
 $(makePrisms ''SpecSensInfo)
 
+-- |Projects the sensitivity map from 'SensCxt'.
 getSensCxt :: SensCxt -> M.Map Var Float
 getSensCxt = view sensmap
 
@@ -93,20 +118,25 @@ instance Monoid Sens where
   mappend _                   _                   = Sens Nothing
 #endif
 
+-- |Returns 0 if both sensitivities are 0, otherwise returns infinity.
 approx :: Maybe Float -> Maybe Float -> Maybe Float
 approx (Just 0) (Just 0) = Just 0
 approx _        _        = Nothing
 
+-- |Checks if the sensitivity is 0, and if so, returns 0, otherwise returns
+-- infinity.
 approx1 :: Maybe Float -> Maybe Float
 approx1 (Just 0) = Just 0
 approx1 _        = Nothing
 
+-- |Returns the minimum of two sensitivities.
 smin :: Maybe Float -> Maybe Float -> Maybe Float
 smin (Just a) (Just b) = Just $ min a b
 smin (Just s) _        = Just s
 smin _        (Just s) = Just s
 smin _        _        = Nothing
 
+-- |Returns pointwise maximum of two sensitivity maps.
 scxtMax :: M.Map Var Float -> M.Map Var Float -> M.Map Var Float
 scxtMax c1 c2 =
   (M.foldrWithKey
@@ -117,30 +147,40 @@ scxtMax c1 c2 =
     M.empty
     c1)
 
-data SpecSensCheckError = UnknownVariable Position Var
-                        | MayNotCoterminate Position
-                        | OutOfBoundsIndex Position
-                        | InternalError Position String
-                        | CannotReleaseInfSensData Position
-                        | CannotBranchOnSensData Position
-                        | CannotEstablishInvariant Position
-                        | ExtraSensInput Position
-                        | ShouldNotOutputTo Position (S.Set Var)
-                        | InvalidExtensionArgs Position
+-- |Errors that may result from speculative sensitivity checking.
+data SpecSensCheckError =
+  UnknownVariable Position Var -- ^Use of undeclared variable
+  | MayNotCoterminate Position -- ^Programs that do not co-terminate are detected
+  | OutOfBoundsIndex Position -- ^Definitely out-of-bounds index
+  | InternalError Position String -- ^The impossible happended! A bug was detected.
+  | CannotReleaseInfSensData Position -- ^Calling Laplace on infinitely sensitive data
+  | CannotBranchOnSensData Position -- ^Conditional branch when branching is disallowed
+  | CannotEstablishInvariant Position -- ^Cannot apply regular While-rule to
+                                      -- establish sensitivities of the whole
+                                      -- loop
+  | ExtraSensInput Position -- ^Extension body uses extra sensitive inputs
+  | ShouldNotOutputTo Position (S.Set Var) -- ^Extension body writes sensitive data to extra variables
+  | InvalidExtensionArgs Position -- ^Extension parameters that are not allowed by its typing rule
   deriving (Show, Eq, Typeable)
 
 instance Exception SpecSensCheckError
 
+-- |Convenient expression sensitivity information to be modifed with operators
+-- from the 'lens' library to build complex expression sensitivity information.
 defaultEInfo :: (Monad m) => SpecSensInfo (StateT SensCxt m)
 defaultEInfo = ESpecSensInfo
                  (return Nothing)
                  S.defaultEInfo
 
+-- |Convenient command sensitivity information to be modifed with operators
+-- from the 'lens' library to build complex expression sensitivity information.
 defaultCInfo :: (Monad m) => SpecSensInfo (StateT SensCxt m)
 defaultCInfo = CSpecSensInfo
                  (return (0, 0))
                  S.defaultCInfo
 
+-- |Uses the shape checking f-algebra to run shape check on the program fragment
+-- and returns its shape information.
 projShapeCheck :: ( MonadThrow m
                   , MonadReader ShapeCxt m
                   , MonadCont m
@@ -149,6 +189,8 @@ projShapeCheck :: ( MonadThrow m
                => f (SpecSensInfo (StateT s m)) -> m ShapeInfo
 projShapeCheck fa = shapeCheck $ fmap (view shape_info) fa
 
+-- |Tries to constant fold a term, and check if it results in a static int
+-- value.
 hasStaticIntValue :: ( MonadThrow m
                      , MonadReader ShapeCxt m
                      , MonadState  SensCxt  m
@@ -183,6 +225,8 @@ hasStaticIntValue e =
             _ -> return Nothing
     Nothing -> return Nothing
 
+-- |'SpecSensCheck' provides the f-algebra that implements speculative
+-- sensitivity checking.
 class SpecSensCheck f where
   specSensCheck :: ( MonadThrow m
                    , MonadReader ShapeCxt m
@@ -619,9 +663,9 @@ instance SpecSensCheck (Cmd :&: Position) where
     return $ defaultCInfo & shape_info .~ shapeInfo
                           & eps_delta .~ (return (0, 0))
 
--- verifies that sensitive data only flows from s to t.
--- returns True in the fst component of the output, if any other sensitive input is used
--- returns any other sensitive output in the snd component of the output
+-- |Verifies that sensitive data only flows from 's' to 't'.  returns True in the
+-- fst component of the output, if any other sensitive input is used returns any
+-- other sensitive output in the snd component of the output
 verifyFlow :: (MonadState SensCxt m)
            => Var -> Var -> S.Set Var
            -> m (Eps, Delta)
@@ -657,6 +701,8 @@ verifyFlow s t modifiedVars eff = do
 
   return (hasExtraSensInput, S.delete t sensOutputs)
 
+-- |Verifies that the sensitive modified variables is a subset of the parameter
+-- 'modifiedVars'.
 verifyGreenMvs :: (MonadState SensCxt m)
                => S.Set Var
                -> m (Eps, Delta)
@@ -920,6 +966,7 @@ instance SpecSensCheck (CTCHint :&: Position) where
                               & eps_delta .~ eff
       _ -> throwM $ S.ExpectCmd p
 
+-- |A convenient function for running the speculative sensitivity checker.
 runSpecSensCheck :: ShapeCxt
                  -> SensCxt
                  -> Term ImpTCP
@@ -934,6 +981,7 @@ runSpecSensCheck shapeCxt sensCxt c = run $ do
     _ -> throwM $ S.ExpectCmd p
   where run = (flip runContT return) . (flip runReaderT shapeCxt)
 
+-- |Extracts the sensitivity declaration from a Fuzzi program as a 'SensCxt'.
 extractSensCxt :: Prog -> SensCxt
 extractSensCxt (Prog decls _) =
   SensCxt (M.fromList (map extract decls)) False M.empty

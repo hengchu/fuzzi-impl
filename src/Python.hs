@@ -1,3 +1,4 @@
+-- |This module implements the transpiler from Fuzzi code to Python code.
 module Python where
 
 import Prelude hiding (EQ, LT, GT, (<>))
@@ -17,6 +18,7 @@ import Control.Monad.Cont
 
 import Debug.Trace
 
+-- |Precedence levels of Fuzzi operators.
 precedence :: M.Map Binop Int
 precedence = M.fromList [(OR, 0), (AND, 1),
                          (EQ, 2), (NEQ, 2),
@@ -25,6 +27,7 @@ precedence = M.fromList [(OR, 0), (AND, 1),
                          (MULT, 5), (DIV, 5)
                         ]
 
+-- |Fixity of Fuzzi operators.
 fixity :: M.Map Binop Int
 fixity = M.fromList [(OR, 1), (AND, 1),
                      (EQ, 0), (NEQ, 0),
@@ -33,6 +36,7 @@ fixity = M.fromList [(OR, 1), (AND, 1),
                      (MULT, 1), (DIV, 1)
                     ]
 
+-- |Correspondence between Fuzzi operators and Python operators.
 opDoc :: M.Map Binop Doc
 opDoc = M.fromList [(OR, text "or"), (AND, text "and"),
                     (EQ, text "=="), (NEQ, text "!="),
@@ -42,22 +46,29 @@ opDoc = M.fromList [(OR, text "or"), (AND, text "and"),
                     (MULT, text "*"), (DIV, text "/")
                    ]
 
+-- |The result of transpilation. The first field contains a function that takes
+-- a precedence level, and produces a 'Doc', which becomes a valid python
+-- program when rendered as string.
 data PythonCode = PythonCode {
   _pythoncode_doc :: Int -> Doc
   , _pythoncode_shape :: ShapeInfo
   }
 
+-- |Convenient value to be modified for building complex 'PythonCode' values.
 defaultPythonCode :: PythonCode
 defaultPythonCode = PythonCode (\_ -> mempty) defaultEInfo
 
-data PythonifyError = UnknownBinop  Position Binop
-                    | InternalError Position String
+-- |Errors that may result from the transpilation process.
+data PythonifyError
+  = UnknownBinop  Position Binop
+  | InternalError Position String
   deriving (Show, Typeable)
 
 instance Exception PythonifyError
 
 $(makeLensesWith underscoreFields ''PythonCode)
 
+-- |Calls shapechecker and returns shape information.
 projectShapeCheck :: ( MonadReader ShapeCxt m
                      , MonadThrow           m
                      , MonadCont            m
@@ -67,9 +78,11 @@ projectShapeCheck :: ( MonadReader ShapeCxt m
 projectShapeCheck py =
   shapeCheck $ fmap (view shape) py
 
+-- |Wraps the document in parenthesis if the boolean is 'True'.
 parensIf :: Bool -> Doc -> Doc
 parensIf cond d = if cond then parens d else d
 
+-- |'Pythonify' provides the f-algebra for transpilation.
 class Pythonify f where
   pythonify :: ( MonadReader ShapeCxt m
                , MonadThrow           m
@@ -78,6 +91,7 @@ class Pythonify f where
 
 $(derive [liftSum] [''Pythonify])
 
+-- |Transpile a binary operation expression.
 pythonifyBinop :: (MonadThrow m) => Binop -> PythonCode -> PythonCode -> Position -> m PythonCode
 pythonifyBinop operator lhs rhs pos = do
   let f = M.lookup operator fixity
@@ -200,12 +214,14 @@ instance Pythonify (Expr :&: Position) where
     return $ defaultPythonCode & doc .~ (\_ -> fstDoc)
                                & shape .~ spinfo
 
+-- |Returns whether a value of the given type needs to be copied.
 tauNeedsCopy :: Tau -> Bool
 tauNeedsCopy (TArr _ _)  = True
 tauNeedsCopy (TBag _)    = True
 tauNeedsCopy (TProd _ _) = True
 tauNeedsCopy _ = False
 
+-- |Workhorse behind 'isTauNumericArray'.
 isTauNumericArray' :: Bool -> Tau -> Bool
 isTauNumericArray' inarray TInt        = inarray
 isTauNumericArray' inarray TFloat      = inarray
@@ -215,13 +231,16 @@ isTauNumericArray' inarray (TArr t _)  = inarray && (isTauNumericArray' True t)
 isTauNumericArray' _       (TBag _)    = False
 isTauNumericArray' _       (TProd _ _) = False
 
+-- |Returns whether the given type is a numeric array.
 isTauNumericArray :: Tau -> Bool
 isTauNumericArray (TArr t _) = isTauNumericArray' True t
 isTauNumericArray _ = False
 
+-- |Just a single dot.
 dot :: Doc
 dot = text "."
 
+-- |Returns a default value of the given type as a python term.
 defaultValue :: (MonadThrow m) => Tau -> m Doc
 defaultValue TInt = return $ int 0
 defaultValue TFloat = return $ float 0
@@ -246,6 +265,7 @@ defaultValue (TProd t1 t2) = do
   t2v <- defaultValue t2
   return $ brackets (t1v <> comma <+> t2v)
 
+-- |Returns the inner type of an array type or bag type.
 getArrayOrBagContentTau :: (MonadThrow m) => Tau -> Position -> m Tau
 getArrayOrBagContentTau (TArr t _) _ = return t
 getArrayOrBagContentTau (TBag t) _ = return t
@@ -351,6 +371,7 @@ instance Pythonify (CTCHint :&: Position) where
     return $ defaultPythonCode & doc .~ (\_ -> hintDoc)
                                & shape .~ spinfo
 
+-- |The python dependencies of generated code.
 imports :: Doc
 imports = vcat [
   text "import numpy as np",
@@ -358,6 +379,7 @@ imports = vcat [
   text "import copy"
   ]
 
+-- |Two runtime functions that the generated code needs.
 prologue :: Doc
 prologue = text $ unlines [
   "def resize_bag(arr, new_len, v):",
@@ -370,6 +392,7 @@ prologue = text $ unlines [
   "  return data[name]"
   ]
 
+-- |Generates code that loads input data.
 transInputs :: (MonadThrow m) => String -> [Decl] -> m Doc
 transInputs path decls = do
   let readJsonDoc = text "input_data"
@@ -399,15 +422,18 @@ transInputs path decls = do
             nest 2 $ text "pass"
             ]
 
+-- |Transpile a program variable declaration.
 transDecl :: (MonadThrow m) => Decl -> m Doc
 transDecl (Decl _ x _ t) = do
   initDoc <- defaultValue t
   return $ text x <+> equals <+> initDoc
 
+-- |Transpile a list of program variable declaration.
 transDecls :: (MonadThrow m) => [Decl] -> m Doc
 transDecls decls =
   vcat <$> mapM transDecl decls
 
+-- |A convenient function for running the transpiler.
 runPythonify :: String -> [Decl] -> Term ImpTCP -> Either SomeException Doc
 runPythonify jsonDataPath decls prog = run $ do
   declsDoc <- transDecls decls
