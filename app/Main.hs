@@ -29,7 +29,6 @@ data Options = Options {
   , optInputFile :: String -- use "stdin" for stdin
   , optOutputFile :: String -- use "-" for stdout
   , optDataFile :: String
-  , optDepth :: Int
   } deriving (Show, Eq, Ord)
 
 data Output = Output {
@@ -67,11 +66,6 @@ options =
         (\arg opt -> return $ opt{optOutputFile = arg})
         "FILE")
       "Output file path",
-    Option "d" ["depth"]
-      (ReqArg
-        (\arg opt -> return $ opt{optDepth = read arg})
-        "INT")
-      "Search depth",
     Option "h" ["help"]
       (NoArg
         (\_ -> do
@@ -82,7 +76,7 @@ options =
   ]
 
 startOptions :: Options
-startOptions = Options SensitivityCheck "" "stdin" "-" "" 100
+startOptions = Options SensitivityCheck "" "stdin" "-" ""
 
 main :: IO ()
 main = do

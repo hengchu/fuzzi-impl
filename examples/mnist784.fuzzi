@@ -1,0 +1,102 @@
+types
+
+db :[1.0] { [float(785)] };
+db1: { [float(786)] };
+trow: [float(785)];
+trow1: [float(786)];
+
+zero_785 : [float(785)];
+zero_786 : [float(786)];
+
+w:      [float(785)];
+dws: {[float(785)]};
+dws_j: {float};
+j_sum: float;
+tf_out: float;
+twout: [float(785)];
+
+i: int;
+j: int;
+
+dt: float;
+temp: float;
+prob: float;
+sc: float;
+
+size: float;
+
+epoch: int;
+lamb: float;
+rate: float;
+
+end
+
+lamb = 0.1;
+rate = 0.1;
+epoch = 0;
+
+size $= lap(10.0, fc(length(db)));
+
+ac(epoch, 100, 1.0e-6,
+
+/* extend each row with a constant 1.0 for bias */
+bmap(db, db1, trow, i, trow1,
+  trow1 = zero_786;
+  trow1[0] = 1.0;
+
+  j = 0;
+  repeat(j, 785,
+    trow1[j+1] = trow[j];
+  );
+  j = 0;
+);
+
+/* compute the gradient for each row */
+i = 0;
+trow1 = zero_786;
+bmap(db1, dws, trow1, i, twout,
+  twout = zero_785;
+
+  j = 0;
+  repeat(j, 785,
+    twout[j] = trow1[j];
+  );
+  j = 0;
+
+  dt = clip(dot(twout, w), 100.0);
+  temp = exp(-1.0 * trow1[785] * dt);
+  prob = 1.0 / (1.0 + temp);
+  sc = (1.0 - prob) * trow1[785];
+  twout = scale(sc, twout);
+
+  dt = 0.0;
+  temp = 0.0;
+  prob = 0.0;
+  sc = 0.0;
+);
+
+j = 0;
+repeat(j, 785,
+  i = 0; twout = zero_785; tf_out = 0.0;
+  bmap(dws, dws_j, twout, i, tf_out, tf_out = twout[j];);
+  i = 0;tf_out = 0.0;
+  bsum(dws_j, j_sum, i, tf_out, 1.0);
+  j_sum $= lap(5000.0, j_sum);
+  w[j] = w[j] + (j_sum / size - 2.0 * lamb * w[j]) * rate;
+);
+
+/* clear aux variables */
+db1 = {};
+dt = 0.0;
+dws = {};
+dws_j = {};
+i = 0;
+prob = 0.0;
+sc = 0.0;
+temp = 0.0;
+tf_out = 0.0;
+trow = zero_785;
+trow1 = zero_786;
+twout = zero_785;
+j = 0;
+);

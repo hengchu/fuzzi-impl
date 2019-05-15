@@ -129,7 +129,8 @@ except KeyError:
   pass
 
 
-db_size = np.random.laplace(float(len(db)), 1.0)
+#db_size = np.random.laplace(float(len(db)), 1.0)
+db_size = float(len(db))
 """begin extension hint: bmap"""
 i = 0
 all_labels = copy.deepcopy([])
@@ -160,7 +161,7 @@ while i < len(all_labels):
       label_sum = label_sum + t_label_sum
   i = i + 1
 """end extension hint: bsum"""
-label_sum = np.random.laplace(label_sum, 1.0)
+#label_sum = np.random.laplace(label_sum, 1.0)
 positive_fraction = label_sum / db_size
 if positive_fraction < 0.0:
   positive_fraction = 1.0e-3
@@ -230,22 +231,22 @@ while j < 57:
         positive_feature_sum_j = positive_feature_sum_j + t_sum
     i = i + 1
   """end extension hint: bsum"""
-  positive_feature_sum_j = np.random.laplace(positive_feature_sum_j, 10.0)
-  negative_feature_sum_j = np.random.laplace(negative_feature_sum_j, 10.0)
+  #positive_feature_sum_j = np.random.laplace(positive_feature_sum_j, 10.0)
+  #negative_feature_sum_j = np.random.laplace(negative_feature_sum_j, 10.0)
   theta_positive[j] = positive_feature_sum_j / label_sum
   theta_negative[j] = negative_feature_sum_j / label_sum
-  if theta_positive[j] < 0.0:
-    theta_positive[j] = 1.0e-3
+  if theta_positive[j] <= 0.0:
+    theta_positive[j] = 1.0e-1
   else:
-    if theta_positive[j] > 1.0:
-      theta_positive[j] = 0.999
+    if theta_positive[j] >= 1.0:
+      theta_positive[j] = 0.9
     else:
       pass
-  if theta_negative[j] < 0.0:
-    theta_negative[j] = 1.0e-3
+  if theta_negative[j] <= 0.0:
+    theta_negative[j] = 1.0e-1
   else:
-    if theta_negative[j] > 1.0:
-      theta_negative[j] = 0.999
+    if theta_negative[j] >= 1.0:
+      theta_negative[j] = 0.9
     else:
       pass
   w[j] = np.log(theta_positive[j] / theta_negative[j]) - np.log((1.0 - theta_positive[j]) / (1.0 - theta_negative[j]))
@@ -257,5 +258,3 @@ i = 0
 while i < len(b_collection):
   b = b + b_collection[i]
   i = i + 1
-
-

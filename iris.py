@@ -214,7 +214,8 @@ while epoch < 5:
   j = 0
   while j < 3:
     this_partition = copy.deepcopy(parts[j])
-    part_size = np.random.laplace(float(len(this_partition)), 1.0)
+    #part_size = np.random.laplace(float(len(this_partition)), 1.0)
+    part_size = float(len(this_partition))
     """begin extension hint: repeat"""
     k = 0
     while k < 4:
@@ -242,7 +243,7 @@ while epoch < 5:
             t_coord_k_sum = t_coord_k_sum + t_coord_k
         i = i + 1
       """end extension hint: bsum"""
-      t_coord_k_sum = np.random.laplace(t_coord_k_sum, 10.0)
+      #t_coord_k_sum = np.random.laplace(t_coord_k_sum, 10.0)
       t_coord_k_sum = t_coord_k_sum / part_size
       """begin extension hint: get_cs"""
       if j == 0:
@@ -269,5 +270,3 @@ while epoch < 5:
   """end extension hint: repeat"""
   epoch = epoch + 1
 """end extension hint: repeat"""
-
-
