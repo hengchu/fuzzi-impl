@@ -2,7 +2,7 @@ INCLUDE=fuzzi-lib/stdexts.fuzzi
 
 .PHONY: fuzzi
 fuzzi:
-	stack build && stack haddock
+	stack haddock -j6
 
 .PHONY: preprocess
 preprocess:
@@ -37,3 +37,30 @@ transpile:
 			    -f examples/pate_label.fuzzi \
 			    -t fuzzi-gen/fuzzi/data/pate/pate_test.json \
 		 	    > fuzzi-gen/fuzzi/generated/pate_label.py
+
+.PHONY: typecheck
+typecheck:
+	@echo ">>> typechecking mnist code..."
+	stack exec -- fuzzi -I $(INCLUDE) \
+			    -f examples/mnist784.fuzzi \
+			    | python3.7 -m json.tool
+	@echo ">>> typechecking naive bayes code..."
+	stack exec -- fuzzi -I $(INCLUDE) \
+			    -f examples/nb.fuzzi \
+			    | python3.7 -m json.tool
+	@echo ">>> typechecking iris code..."
+	stack exec -- fuzzi -I $(INCLUDE) \
+			    -f examples/kmeans.fuzzi \
+			    | python3.7 -m json.tool
+	@echo ">>> typechecking PATE code..."
+	stack exec -- fuzzi -I $(INCLUDE) \
+			    -f examples/pate784.fuzzi \
+			    | python3.7 -m json.tool
+	stack exec -- fuzzi -I $(INCLUDE) \
+			    -f examples/pate_label.fuzzi \
+			    | python3.7 -m json.tool
+
+.PHONY: image
+image:
+	docker build -t fuzzi-impl:latest -m 8g --squash .
+#docker save fuzzi-impl | gzip -9 > fuzzi-artifact.tgz
