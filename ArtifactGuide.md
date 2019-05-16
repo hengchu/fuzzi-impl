@@ -20,9 +20,25 @@ your current working directory is `/tmp/fuzzi-impl`.
 
 ## Building on your host system from source
 
-TODO
+System requirements:
+
+1. You must have Python3.7 installed, this is necessary for running transpiled fuzzi code
+2. You must have `stack` the Haskell package management tool installed
+
+If these requirements are not met, please follow the "Using Docker" instructions.
+
+To build from source, first change your working directory to `fuzzi-impl/`, then
+execute the `bootstrap.sh` script.
+
+This will both build `fuzzi` and its documentation, setup a sandbox environment
+for the emitted python code of some example `fuzzi` programs, and run the fuzzi
+typechecker on these programs and emit their type information to standard out.
 
 # Step-by-step guide
+
+All of the following instructions apply uniformly regardless whether you are
+using the docker image or using your own built artifact from source, as long as
+your current working directory is at the top level of `fuzzi-impl/`.
 
 We provide a `Makefile` for typechecking, transpiling and running the
 evaluations described in the paper. There are 4 evaluation experiments:
