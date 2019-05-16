@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 __VERSION__ = '0.0.1'
 
-setup(name='fuzzi-gen',
+setup(name='fuzzi_gen',
       version=__VERSION__,
       packages=find_packages(),
       include_package_data=True,

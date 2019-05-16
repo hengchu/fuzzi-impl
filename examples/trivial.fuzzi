@@ -1,0 +1,6 @@
+/* trivial.fuzzi */
+types
+x :[1.0] float;
+end
+
+skip;

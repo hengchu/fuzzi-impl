@@ -1,0 +1,26 @@
+/* examples/kitchensink.fuzzi */
+types
+inputs: [1.0] {float};
+outputs: [float];
+private_sum: float;
+public_sum: float;
+
+/* aux variables used by bsum */
+i: int;
+tin: float;
+
+/* aux variables used by ac */
+adv_comp_iter: int;
+end
+
+length(outputs) = 100;
+ac(adv_comp_iter, 100, 1.0e-6,
+  bsum(inputs, private_sum, i, tin, 50.0);
+  public_sum $= lap(200.0, private_sum);
+  outputs[adv_comp_iter] = public_sum;
+
+  /* clear aux variables */
+  private_sum = 0.0;
+  tin = 0.0;
+  i = 0;
+);

@@ -60,7 +60,18 @@ typecheck:
 			    -f examples/pate_label.fuzzi \
 			    | python3.7 -m json.tool
 
+.PHONY: evaluate
+evaluate:
+	@echo ">>> running logistic regression evaluation..."
+	fuzzi-eval-mnist
+	@echo ">>> running naive bayes evaluation..."
+	fuzzi-eval-spam
+	@echo ">>> running teacher ensemble evaluation..."
+	fuzzi-eval-pate
+	@echo ">>> running kmeans evaluation..."
+	fuzzi-eval-iris
+
 .PHONY: image
 image:
 	docker build -t fuzzi-impl:latest -m 8g --squash .
-#docker save fuzzi-impl | gzip -9 > fuzzi-artifact.tgz
+	docker save fuzzi-impl | pigz -9 > fuzzi-artifact.tgz

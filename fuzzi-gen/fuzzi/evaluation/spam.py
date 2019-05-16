@@ -1,4 +1,5 @@
 import json
+import pkg_resources
 import numpy as np
 
 SIZE = 57
@@ -9,7 +10,7 @@ def main():
     w = naiveBayes.w
     b = naiveBayes.b
 
-    g = open('testdata/spam.json')
+    g = open(pkg_resources.resource_filename('fuzzi', 'data/spambase/spam.json'))
     train = json.load(g)
     X = train['db_test']
 

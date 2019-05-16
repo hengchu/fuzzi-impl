@@ -1,0 +1,9 @@
+/* examples/arithmetic.fuzzi */
+types
+x :[1.0] float;
+y :[2.0] float;
+z : float;
+end
+
+z = 2.0 * x;
+z = z + y;

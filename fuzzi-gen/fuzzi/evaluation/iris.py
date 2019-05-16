@@ -1,4 +1,5 @@
 import json
+import pkg_resources
 import numpy as np
 
 SIZE = 57
@@ -8,7 +9,7 @@ def main():
 
     part = kmeans.parts
 
-    g = open('testdata/iris.json')
+    g = open(pkg_resources.resource_filename('fuzzi', 'data/Iris/iris.json'))
     train = json.load(g)
     X = train['db_test']
 
