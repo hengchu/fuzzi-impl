@@ -76,7 +76,7 @@ evaluate:
 .PHONY: image
 image:
 	docker build -t fuzzi-impl:latest -m 8g --squash .
-	docker save fuzzi-impl | pigz -9 > fuzzi-artifact.tgz
+	docker save fuzzi-impl | gzip > fuzzi-artifact.tgz
 
 .PHONY: copydoc
 copydoc:
