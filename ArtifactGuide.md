@@ -10,7 +10,7 @@ There are two options for building Fuzzi: 1). use the provided docker image, or
 1. Install Docker following the [official guide](https://docs.docker.com/install/)
 2. Download the image [here](https://drive.google.com/file/d/16JyxDwii9Np3KGBCti95bhp5vSkh2LGV/view?usp=sharing)
 3. Start the docker daemon. Docker will ask for your host system credential on first time startup, and it may also show a login UI for dockerhub. However, you do *not* need to login for the following steps
-4. Run `docker image load -i fuzzi-artifact.tgz`, this may take a few minutes
+4. Run `docker image load -i fuzzi-artifact.tgz`, this may take a while to complete
 5. Run `docker images`, and verify it shows an image with `REPOSITORY fuzzi-impl`
 6. Run `docker run --rm -it fuzzi-impl`
 
@@ -24,6 +24,7 @@ System requirements:
 
 1. You must have Python3.7 installed, this is necessary for running transpiled fuzzi code
 2. You must have `stack` the Haskell package management tool installed
+3. You must have `make` installed
 
 If these requirements are not met, please follow the "Using Docker" instructions.
 
@@ -45,9 +46,9 @@ evaluations described in the paper. There are 4 evaluation experiments:
 1). logistic regression on MNIST, 2). ensemble of logistic regression models on
 MNIST, 3). naive bayes on spambase, and 4). kmeans clustering on iris data.
 
-To start, first run `source fuzzi-gen/venv/bin/activate`. This starts a virtual
-environment for python code that we will later run. All instructions below
-assume your shell is in this virtual environment.
+To start, first run `source fuzzi-gen/venv/bin/activate`. This starts a
+sandboxed virtual environment for python code that we will later run. All
+instructions below assume your shell is in this virtual environment.
 
 The `Makefile` targets:
 
@@ -57,19 +58,21 @@ The `Makefile` targets:
 - `transpile`: runs the `fuzzi` transpiler on each evaluation experiment's source code, and emits the output to proper locations within the `fuzzi-gen` directory; the `fuzzi-gen` directory is a `python3` project that holds the generated code
 - `evaluate`: runs each of the evaluate experiment's emitted python code, and print accuracy information to standard out
 
-The docker image has already run the targets `fuzzi`, `preprocess`, and
+The docker image has already pre-run the targets `fuzzi`, `preprocess`, and
 `transpile`. Feel free to re-run them to compile, preprocess data, and transpile
 fuzzi code again, or simply skip them.
 
 Run `make typecheck` to verify that `fuzzi` correctly typechecks each program.
 
 Run `make evaluate` to re-run the evaluation experiments (this takes several
-minutes).
+minutes). Note that since the evaluation examples are randomized programs, you
+may get different results on each execution.
 
 ## Writing your own `fuzzi` program
 
-Each `fuzzi` program must start with a non-empty type declaration segment, and a
-non-empty program body. The most trivial `fuzzi` program is something like this:
+Each `fuzzi` program must start with a non-empty type declaration segment,
+followed by a non-empty program body. The most trivial `fuzzi` program is
+something like this:
 
 ```
 /* examples/trivial.fuzzi */
@@ -119,12 +122,12 @@ $ stack exec -- fuzzi -I fuzzi-lib/stdexts.fuzzi -f examples/arithmetic.fuzzi
 {"sensitivities":{"x":1.0,"y":2.0,"z":4.0},"epsilon":0.0,"delta":0.0}
 ```
 
-The typechecker automatically infers the sensitivity of $z$ based on the typing
+The typechecker automatically infers the sensitivity of `z` based on the typing
 rules described in the paper.
 
 ### Running your own `fuzzi` program
 
-We will use `examples/arithmetic.fuzzi` as the running example. To run a `fuzzi`
+We will use `examples/arithmetic.fuzzi` as the example. To run a `fuzzi`
 program, we need to do 2 things:
 
 1. Create a `json` file that contains the initial values program inputs
@@ -136,8 +139,6 @@ examples of how fuzzi values are represented by json values.
 |          | int             | float                     | [int]     | {int}     | (int, float) | {[int]}          |
 |----------|-----------------|---------------------------|-----------|-----------|--------------|------------------|
 | examples | 1, 2, 3...      | 1.0, 1.1, 2.2...          | [1, 2, 3] | [1, 2, 3] | [1, 2.1]     | [[1, 2], [2, 3]] |
-|          | [int(5)]        | [float(5)]                |           |           |              |                  |
-| examples | [1, 2, 3, 4, 5] | [1.0, 2.0, 3.0, 4.0, 5.0] |           |           |              |                  |
 
 For `examples/arithmetic.fuzzi`, we create the following file `fuzzi-gen/fuzzi/data/other/arithmetic.json` with contents:
 
@@ -149,8 +150,8 @@ For `examples/arithmetic.fuzzi`, we create the following file `fuzzi-gen/fuzzi/d
 ```
 
 Notice that we did not specify a starting value for `z` since we do not care
-what it is. In these cases, we can omit variables with "don't care" values from
-the json data file.
+what it is. We can omit variables with "don't care" values from the json data
+file.
 
 To transpile, we run
 
@@ -284,3 +285,28 @@ Notice that most answers are quite close to the actual answer `1180.0`, thanks
 to the fact that we are summing up a non-trivial amount of data. If the input
 array only contained a few floats, then the laplace noise added to the
 `private_sum` would ruin the utility of the sum.
+
+----
+
+The `fuzzi` binary takes the following command line arguments
+
+```
+fuzzi
+  -s       --sensitivity     Sensitivity check
+  -t FILE  --transpile=FILE  JSON data file path
+  -I FILE  --file=FILE       Extension library path
+  -f FILE  --file=FILE       Input file path
+  -h       --help            Show help
+```
+
+- `-f`: specifies the input `fuzzi` source code file to be typechecked or transpiled
+- `-I`: specifies an extension library source code file, in all examples above, we used `fuzzi-lib/stdexts.fuzzi` as the extension library file, which contains all of the extensions described in the paper
+- `-s`: run sensitivity check (this is the default task)
+- `-t`: specifies a json file path that will be used as the starting state of a transpiled fuzzi program
+
+When `-t path/to/data.json` is specified, the `fuzzi` binary prints the
+transpiled python code to standard out. You may redirect the transpiled code to
+any location, but we recommend following the examples shown above, and redirect
+it to `fuzzi-gen/fuzzi/generated/<filename>.py`, as we have setup the
+`fuzzi-gen` python project to automatically pickup these generated code as
+python modules when you run `pip3 install --editable fuzzi-gen`.

@@ -27,7 +27,6 @@ data Options = Options {
   optMode :: ExecMode
   , optExtFile :: String -- the path to the extension library file
   , optInputFile :: String -- use "stdin" for stdin
-  , optOutputFile :: String -- use "-" for stdout
   , optDataFile :: String
   } deriving (Show, Eq, Ord)
 
@@ -61,11 +60,6 @@ options =
         (\arg opt -> return $ opt{optInputFile = arg})
         "FILE")
       "Input file path",
-    Option "o" ["file"]
-      (ReqArg
-        (\arg opt -> return $ opt{optOutputFile = arg})
-        "FILE")
-      "Output file path",
     Option "h" ["help"]
       (NoArg
         (\_ -> do
@@ -76,7 +70,7 @@ options =
   ]
 
 startOptions :: Options
-startOptions = Options SensitivityCheck "" "stdin" "-" ""
+startOptions = Options SensitivityCheck "" "stdin" ""
 
 main :: IO ()
 main = do
