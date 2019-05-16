@@ -310,3 +310,13 @@ any location, but we recommend following the examples shown above, and redirect
 it to `fuzzi-gen/fuzzi/generated/<filename>.py`, as we have setup the
 `fuzzi-gen` python project to automatically pickup these generated code as
 python modules when you run `pip3 install --editable fuzzi-gen`.
+
+## Browsing fuzzi source code and documentation
+
+The docker image contains pre-built documentation pages as HTML files. However,
+these files are best viewed on the host system with a web browser. In order to
+copy these documentation pages from inside the container to the host system,
+first exit the docker container (by pressing `Ctrl-D`) if you are running one,
+then run `make copydoc`. This will produce a `doc` directory, the
+`doc/index.html` file is the place to start for browsing fuzzi source code and
+documentation.

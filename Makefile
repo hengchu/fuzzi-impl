@@ -1,3 +1,5 @@
+DIR := ${CURDIR}
+
 INCLUDE=fuzzi-lib/stdexts.fuzzi
 
 .PHONY: fuzzi
@@ -36,7 +38,7 @@ transpile:
 	stack exec -- fuzzi -I $(INCLUDE) \
 			    -f examples/pate_label.fuzzi \
 			    -t fuzzi-gen/fuzzi/data/pate/pate_test.json \
-		 	    > fuzzi-gen/fuzzi/generated/pate_label.py
+			    > fuzzi-gen/fuzzi/generated/pate_label.py
 
 .PHONY: typecheck
 typecheck:
@@ -75,3 +77,7 @@ evaluate:
 image:
 	docker build -t fuzzi-impl:latest -m 8g --squash .
 	docker save fuzzi-impl | pigz -9 > fuzzi-artifact.tgz
+
+.PHONY: copydoc
+copydoc:
+	sh copydoc.sh
