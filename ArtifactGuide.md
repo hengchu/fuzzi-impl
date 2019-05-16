@@ -28,8 +28,11 @@ System requirements:
 
 If these requirements are not met, please follow the "Using Docker" instructions.
 
-To build from source, first change your working directory to `fuzzi-impl/`, then
-execute the `bootstrap.sh` script.
+To build from source:
+
+1. first change your working directory to `fuzzi-impl/`
+2. checkout the tagged revision `git checkout icfp2019aec`
+3. then execute the `bootstrap.sh` script
 
 This will both build `fuzzi` and its documentation, setup a sandbox environment
 for the emitted python code of some example `fuzzi` programs, and run the fuzzi
@@ -320,3 +323,15 @@ first exit the docker container (by pressing `Ctrl-D`) if you are running one,
 then run `make copydoc`. This will produce a `doc` directory, the
 `doc/index.html` file is the place to start for browsing fuzzi source code and
 documentation.
+
+# Reproducing the docker image
+
+Use the following commands, the last step `make image` takes a while to
+complete (20 min on a 4.0GHz quad core CPU with 16GB RAM).
+
+```
+git clone https://github.com/hengchu/fuzzi-impl.git
+cd fuzzi-impl
+git checkout icfp2019aec
+make image
+```
