@@ -222,6 +222,16 @@ $ stack exec -- fuzzi -I fuzzi-lib/stdexts.fuzzi -f examples/kitchensink.fuzzi |
 }
 ```
 
+We transpile the kitchensink code, and re-install the `fuzz-gen` python project code:
+
+```
+stack exec -- fuzzi -I fuzzi-lib/stdexts.fuzzi \
+                    -f examples/kitchensink.fuzzi \
+                    -t fuzzi-gen/fuzzi/data/other/kitchensink.json \
+                    > fuzzi-gen/fuzzi/generated/kitchensink.py
+pip3 install --editable fuzzi-gen
+```
+
 Starting a `python3.7` session, and running the following commands shows us the output array:
 
 ```
@@ -254,5 +264,7 @@ array([1270.34626426, 1285.60710652, 1107.95582968,  864.8935631 ,
        1330.54362042, 1184.97042221,  418.27973393, 1230.01235741])
 ```
 
-Notice that most answers are quite close to the actual answer `1180.0`. This is
-thanks to the fact that we are summing up a non-trivial amount of data.
+Notice that most answers are quite close to the actual answer `1180.0`, thanks
+to the fact that we are summing up a non-trivial amount of data. If the input
+array only contained a few floats, then the laplace noise added to the
+`private_sum` would ruin the utility of the sum.
