@@ -1,11 +1,11 @@
 Artifact for *Fuzzi: A Three-Level Logic for Differential Privacy*
 
-### Building Fuzzi
+# Building Fuzzi
 
 There are two options for building Fuzzi: 1). use the provided docker image, or
 2). build directly from source.
 
-#### Using Docker
+## Using Docker
 
 1. Install Docker following the [official guide](https://docs.docker.com/install/)
 2. Download the image [here](https://someurl.com)
@@ -18,11 +18,11 @@ This will start a shell at the directory `/tmp/fuzzi-impl`, which holds the
 source code and built binaries of `fuzzi`. All following instructions assume
 your current working directory is `/tmp/fuzzi-impl`.
 
-#### Building on your host system from source
+## Building on your host system from source
 
 TODO
 
-### Step-by-step guide
+# Step-by-step guide
 
 We provide a `Makefile` for typechecking, transpiling and running the
 evaluations described in the paper. There are 4 evaluation experiments:
@@ -50,7 +50,7 @@ Run `make typecheck` to verify that `fuzzi` correctly typechecks each program.
 Run `make evaluate` to re-run the evaluation experiments (this takes several
 minutes).
 
-### Writing your own `fuzzi` program
+## Writing your own `fuzzi` program
 
 Each `fuzzi` program must start with a non-empty type declaration segment, and a
 non-empty program body. The most trivial `fuzzi` program is something like this:
@@ -165,7 +165,7 @@ import statement itself actually executes the arithmetic code as well. Each
 `fuzzi` variable can be accessed as the `arithmetic` module's attributes. Here
 we checked the value of `z`, which indeed is what we had expected.
 
-### More sophisticated examples that release private information and use extensions
+## More sophisticated examples that release private information and use extensions
 
 For this example, let's assume we have a 1-sensitive bag of input floats, we
 will clip and sum these values up, release the sum as public information. And
