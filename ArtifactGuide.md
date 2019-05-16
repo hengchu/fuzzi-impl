@@ -8,7 +8,7 @@ There are two options for building Fuzzi: 1). use the provided docker image, or
 ## Using Docker
 
 1. Install Docker following the [official guide](https://docs.docker.com/install/)
-2. Download the image [here](https://someurl.com)
+2. Download the image [here](https://drive.google.com/file/d/16JyxDwii9Np3KGBCti95bhp5vSkh2LGV/view?usp=sharing)
 3. Start the docker daemon. Docker will ask for your host system credential on first time startup, and it may also show a login UI for dockerhub. However, you do *not* need to login for the following steps
 4. Run `docker image load -i fuzzi-artifact.tgz`, this may take a few minutes
 5. Run `docker images`, and verify it shows an image with `REPOSITORY fuzzi-impl`

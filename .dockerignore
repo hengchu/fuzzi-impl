@@ -1,0 +1,9 @@
+venv
+logs
+checkpoints
+*.ipynb
+*.egg-info/
+build/
+.stack-work/
+fuzzi-gen/venv
+*.tgz
